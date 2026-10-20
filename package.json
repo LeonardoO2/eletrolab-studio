@@ -1,0 +1,50 @@
+{
+  "name": "eletrolab-studio",
+  "version": "0.11.0",
+  "description": "Editor visual e simulador didático de comandos elétricos e CLP (Ladder)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node tests/test.js",
+    "dist": "electron-builder --publish never",
+    "release": "electron-builder --publish always"
+  },
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "br.com.eletrolab.studio",
+    "productName": "EletroLab Studio",
+    "files": [
+      "main.js",
+      "index.html",
+      "js/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "EletroLab-Studio-Setup-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "LeonardoO2",
+        "repo": "eletrolab-studio"
+      }
+    ],
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    }
+  },
+  "license": "MIT",
+  "dependencies": {
+    "electron-updater": "^6.3.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LeonardoO2/eletrolab-studio.git"
+  }
+}

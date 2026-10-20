@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EletroLab Studio v0.11.0 - CLP & Ladder</title>
+<style>
+:root{--bg:#10151d;--panel:#18212c;--panel2:#202c39;--line:#344456;--text:#eaf1f8;--muted:#9fb0c2;--accent:#43c6ac;--warn:#f6c85f;--danger:#ff7777;--plc:#8ca8f9}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px "Segoe UI",Arial,sans-serif;height:100vh;overflow:hidden}
+header{height:58px;display:flex;align-items:center;gap:16px;padding:0 18px;background:#0b1016;border-bottom:1px solid var(--line)}
+.brand{font-size:18px;font-weight:700;letter-spacing:.3px}.brand span{color:var(--accent)}.sub{color:var(--muted);font-size:12px}
+button,select,input{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
+button{cursor:pointer}button:hover{border-color:var(--accent)}button.primary{background:var(--accent);border-color:var(--accent);color:#06221d;font-weight:700}
+button.active{border-color:var(--accent);color:var(--accent)}button.danger{color:var(--danger)}
+.toolbar{margin-left:auto;display:flex;gap:8px;align-items:center}
+main{display:grid;grid-template-columns:250px minmax(400px,1fr) 270px;height:calc(100vh - 58px)}
+main.focus{grid-template-columns:0 minmax(400px,1fr) 0}main.focus aside{padding:0;border:0;overflow:hidden}
+aside{background:var(--panel);padding:14px;overflow:auto}.left{border-right:1px solid var(--line)}.right{border-left:1px solid var(--line)}
+h3{font-size:12px;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted);margin:14px 0 8px}h3:first-child{margin-top:0}
+.palette{display:grid;grid-template-columns:1fr 1fr;gap:8px}.part{min-height:54px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;cursor:pointer;padding:6px;text-align:center;font-size:11px}.part:hover{border-color:var(--accent)}.part.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}.sym{font-size:16px;color:var(--accent);font-weight:600}.sym.clp{color:var(--plc)}.sym.pos{color:#ffb454}.sym.neg{color:#4aa3ff}.sym.warn{color:var(--warn)}
+.workspace{position:relative;min-width:0;min-height:0;display:flex;flex-direction:column}
+.canvasbar{height:42px;flex:none;display:flex;align-items:center;gap:6px;padding:0 12px;background:#141c25;border-bottom:1px solid var(--line);overflow:hidden}
+.canvasbar button{padding:5px 8px;white-space:nowrap}
+.canvasbar .hint{margin-left:auto;color:var(--muted);font-size:12px;white-space:nowrap}
+@media (max-width:1560px){.canvasbar .hint,.canvasbar .lbl{display:none}}
+/* janelas menores: painéis mais estreitos e barra só com ícones nos botões longos, para o diagrama ficar maior */
+@media (max-width:1400px){main{grid-template-columns:200px minmax(400px,1fr) 220px}.canvasbar .lbl,.canvasbar .hint{display:none}}
+.tab{padding:6px 11px!important}.tab.active{background:var(--accent);color:#06221d;font-weight:700;border-color:var(--accent)}
+.sep{width:1px;height:22px;background:var(--line);margin:0 4px;flex:none}
+.zoomlbl{min-width:44px;text-align:center;color:var(--muted);font-size:12px}
+/* três vistas: circuit (só o diagrama), split (diagrama em cima, Ladder embaixo) e ladder (só o editor) */
+.views{position:relative;flex:1;min-height:0;--split:50%}
+canvas{position:absolute;left:0;right:0;top:0;bottom:0;width:100%;height:100%;background:#111923;cursor:default;touch-action:none}
+canvas.wire{cursor:crosshair}canvas.pan{cursor:grabbing}
+#ladderView{position:absolute;left:0;right:0;top:0;bottom:0;overflow:auto;padding:16px;display:none;background:#111923}
+#splitter{display:none;position:absolute;left:0;right:0;top:var(--split);height:10px;margin-top:-5px;cursor:row-resize;z-index:5}
+#splitter::after{content:'';position:absolute;left:50%;top:3px;width:64px;height:4px;margin-left:-32px;border-radius:2px;background:#3a4c61}
+#splitter:hover::after,#splitter.drag::after{background:var(--accent)}
+#plantView{position:absolute;left:0;right:0;top:0;bottom:0;display:none;background:#111923}
+.views.plant #canvas,.views.plant #ladderView,.views.plant #splitter{display:none}
+.views.plant #plantView{display:block}
+#plantMini{position:relative;width:100%;height:190px;border-radius:8px;border:1px solid var(--line);cursor:pointer;display:block;margin-bottom:8px}
+.pf{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:var(--muted);margin:6px 0}
+.pf input{width:78px;padding:4px 6px}
+.views.ladder canvas{display:none}
+.views.ladder #ladderView{display:block}
+.views.split canvas{height:var(--split);bottom:auto}
+.views.split #ladderView{display:block;top:var(--split);border-top:1px solid var(--line);padding:12px 16px}
+.views.split #splitter{display:block}
+.views.split .ladder-intro{display:none}
+.status{height:30px;flex:none;display:flex;align-items:center;padding:0 12px;border-top:1px solid var(--line);color:var(--muted);font-size:12px;background:#141c25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.status.err{color:var(--danger)}
+.field{display:flex;flex-direction:column;gap:5px;margin:12px 0}.field label{font-size:12px;color:var(--muted)}.field input{width:100%}
+.metric{background:var(--panel2);border-radius:8px;padding:10px;margin:8px 0}.metric .label{color:var(--muted);font-size:11px}.metric .value{font-size:18px;font-weight:700;margin-top:3px}.good{color:var(--accent)}.bad{color:var(--danger)}.note{font-size:12px;line-height:1.5;color:var(--muted)}
+aside.right .section{margin-bottom:20px}aside.right .section:last-child{margin-bottom:0}
+.tagsbox{font-family:Consolas,"Courier New",monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;color:var(--plc);background:#141c25;border:1px solid var(--line);border-radius:8px;padding:8px 10px;max-height:168px;overflow:auto}
+#tooltip{position:fixed;display:none;background:rgba(20,28,37,0.95);border:1px solid var(--accent);color:var(--text);padding:8px 12px;border-radius:6px;font-size:12px;line-height:1.5;pointer-events:none;z-index:100;box-shadow:0 4px 12px rgba(0,0,0,0.5)}
+
+/* ===== Editor Ladder (linhas contínuas entre os trilhos) ===== */
+.ladder-intro{color:var(--muted);font-size:12px;line-height:1.6;margin-bottom:14px;max-width:900px}
+.rung{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px 12px;margin-bottom:14px}
+.rung.on{border-color:var(--accent)}
+.rung-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.rung-n{font-weight:700;color:var(--plc);white-space:nowrap}
+.rung-comment{flex:1;min-width:0;padding:5px 8px;font-size:12px}
+.mini{padding:2px 7px;font-size:12px;line-height:1.3}
+.mini.add{color:var(--plc)}
+.rung-scroll{overflow-x:auto;padding-bottom:4px}
+.rung-body{display:flex;align-items:center;min-width:max-content;width:100%}
+.rail{flex:none;width:6px;align-self:stretch;min-height:88px;background:#51657b;border-radius:3px}
+.running .rail.l{background:var(--accent)}
+.rung.on .rail.r{background:var(--accent)}
+.lw{flex:1 1 18px;min-width:18px;height:3px;background:#51657b}
+.lw.live,.cell.live>.lw{background:var(--accent)}
+.lw.tail{flex:0 0 18px}
+.cell{display:flex;align-items:center;flex:1 1 auto}
+.stack{display:flex;flex-direction:column;align-items:stretch;flex:none;border-left:3px solid transparent;border-right:3px solid transparent}
+.stack.par{border-left-color:#51657b;border-right-color:#51657b}
+.cell.live .stack.par{border-left-color:var(--accent)}
+.stack.par.pass{border-right-color:var(--accent)}
+.contact{display:flex;flex-direction:column;align-items:stretch}
+.tagrow,.footrow{height:26px;display:flex;justify-content:center;align-items:center;gap:4px}
+.tagrow{align-items:flex-end}
+.tag-in{width:88px;padding:2px 6px;font-family:Consolas,monospace;font-size:12px;text-align:center}
+.symrow{height:36px;display:flex;align-items:center}
+.cl{flex:1 1 8px;min-width:8px;height:3px;background:#51657b}
+.contact.lit .cl{background:var(--accent)}
+.symbtn{position:relative;display:flex;align-items:center;gap:14px;height:36px;padding:0 2px;background:none;border:0;border-radius:0;cursor:pointer}
+.symbtn i{display:block;width:3px;height:26px;border-radius:1px;background:var(--plc)}
+.symbtn:hover i,.symbtn:hover.nc::after{background:#c3d0ff}
+.symbtn.nc::after{content:'';position:absolute;left:50%;top:50%;width:3px;height:36px;border-radius:1px;background:var(--plc);transform:translate(-50%,-50%) rotate(35deg)}
+.contact.lit .symbtn i,.contact.lit .symbtn.nc::after{background:var(--accent)}
+.segadd{display:flex;align-items:center;flex:1 1 52px;min-width:52px}
+.addnode{flex:none;width:22px;height:22px;padding:0;border-radius:50%;line-height:1;font-size:14px;color:var(--plc)}
+.outcard{display:flex;flex-direction:column;align-items:center;flex:none}
+.osym{height:36px;display:flex;align-items:center;justify-content:center;min-width:48px}
+.coil{width:30px;height:30px;border-radius:50%;border:3px solid var(--plc);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--plc);font-size:13px}
+.tbox{border:3px solid var(--plc);border-radius:4px;padding:3px 9px;font-weight:700;font-size:12px;color:var(--plc)}
+.outcard.lit .coil,.outcard.lit .tbox{border-color:var(--accent);color:var(--accent);background:rgba(67,198,172,.14)}
+.outcard select{padding:2px 4px;font-size:12px}
+.preset{width:64px;padding:2px 6px;font-size:12px}
+.add-rung{margin-top:4px}
+/* destaque cruzado: a mesma tag acesa no diagrama e no Ladder */
+.contact.hl .tag-in,.outcard.hl .tag-in{border-color:var(--warn);box-shadow:0 0 0 2px rgba(246,200,95,.35)}
+.contact.hl .symbtn i,.contact.hl .symbtn.nc::after{background:var(--warn)}
+</style>
+</head>
+<body>
+<header>
+  <div><div class="brand">Eletro<span>Lab</span> Studio</div><div class="sub">Automação & CLP (Ladder) • v0.11.0</div></div>
+  <div class="toolbar">
+    <button id="newBtn">Novo</button><select id="exampleSel" title="Carregar um exemplo pronto"><option value="">Exemplos…</option><option value="partida">Partida com CLP</option><option value="motor">Motor com proteção (E0, F1)</option><option value="contador">Contagem de peças (CTU)</option><option value="tanque">Tanque (planta didática)</option></select>
+    <button id="simBtn" class="primary">▶ Simular</button><button id="stopBtn">■ Parar</button>
+    <select id="exportSel" title="Exportar a folha de desenho"><option value="">Folha…</option><option value="png">Folha em PNG</option><option value="pdf">Folha em PDF</option></select><button id="saveBtn">Exportar JSON</button><button id="loadBtn">Abrir JSON</button><input id="fileInput" type="file" accept=".json,application/json" hidden>
+  </div>
+</header>
+<main id="mainGrid">
+<aside class="left">
+  <h3>Alimentação</h3>
+  <div class="palette">
+    <div class="part" data-type="source"><div class="sym">− ＋</div><span>Fonte CC</span></div>
+    <div class="part" data-type="ground"><div class="sym">⏚</div><span>Terra (0 V)</span></div>
+    <div class="part" data-type="rail_pos"><div class="sym pos">━ +</div><span>Trilho +24V</span></div>
+    <div class="part" data-type="rail_neg"><div class="sym neg">━ 0</div><span>Trilho 0V</span></div>
+  </div>
+  <h3>CLP</h3>
+  <div class="palette">
+    <div class="part" data-type="plc_cpu"><div class="sym clp">[CLP]</div><span>Bloco do CLP</span></div>
+    <div class="part" data-type="plc_input"><div class="sym clp">[IN]</div><span>Mód. Entrada</span></div>
+    <div class="part" data-type="plc_output"><div class="sym clp">[OUT]</div><span>Mód. Saída</span></div>
+  </div>
+  <div class="note" style="margin-top:8px">A lógica é programada no editor <b>Ladder</b>. Dê dois cliques no bloco do CLP para ver o Ladder junto do circuito.</div>
+  <h3>Comando</h3>
+  <div class="palette">
+    <div class="part" data-type="push_no"><div class="sym">┴─</div><span>Botão S1 (NA)</span></div>
+    <div class="part" data-type="push_nc"><div class="sym">┬─</div><span>Botão S0 (NF)</span></div>
+    <div class="part" data-type="relay_coil"><div class="sym">[ K ]</div><span>Bobina Relé</span></div>
+    <div class="part" data-type="relay_no"><div class="sym">K ┤ ├</div><span>Contato K (NA)</span></div>
+    <div class="part" data-type="relay_nc"><div class="sym">K ┤/├</div><span>Contato K (NF)</span></div>
+  </div>
+  <h3>Cargas</h3>
+  <div class="palette">
+    <div class="part" data-type="lamp"><div class="sym">⊗</div><span>Sinaleiro</span></div>
+    <div class="part" data-type="motor_load"><div class="sym">Ⓜ</div><span>Motor CC</span></div>
+  </div>
+  <h3>Proteção e sensores</h3>
+  <div class="palette">
+    <div class="part" data-type="estop"><div class="sym">⏻</div><span>Emergência (NF)</span></div>
+    <div class="part" data-type="thermal"><div class="sym">F ┤/├</div><span>Relé térmico</span></div>
+    <div class="part" data-type="sensor_ind"><div class="sym">◇</div><span>Sensor indutivo</span></div>
+  </div>
+  <h3>Planta (tanque)</h3>
+  <div class="palette">
+    <div class="part" data-type="level_sw"><div class="sym">⏚</div><span>Sensor de nível</span></div>
+    <div class="part" data-type="pump"><div class="sym">⊳</div><span>Bomba</span></div>
+    <div class="part" data-type="valve"><div class="sym">⋈</div><span>Válvula de dreno</span></div>
+  </div>
+  <h3>Organização</h3>
+  <div class="palette">
+    <div class="part" data-type="zone"><div class="sym warn">▭</div><span>Seção</span></div>
+  </div>
+  <h3>Ferramentas</h3>
+  <button id="wireBtn" style="width:100%;margin-bottom:8px">↗ Conectar fios (W)</button>
+  <button id="selectBtn" style="width:100%;margin-bottom:8px">↖ Selecionar / mover (V)</button>
+  <button id="deleteBtn" style="width:100%">Excluir selecionado</button>
+  <div class="note" style="margin-top:10px">R gira o componente. Roda do mouse dá zoom e arrastar o fundo move a vista. F oculta os painéis. Passe o mouse num terminal ou fio para destacar toda a rede, ou numa tag do Ladder para ver o módulo e o fio correspondentes.</div>
+</aside>
+<section class="workspace">
+  <div class="canvasbar">
+    <button id="tabCircuit" class="tab" title="Só o diagrama">Circuito</button>
+    <button id="tabSplit" class="tab active" title="Diagrama e Ladder juntos">Dividido</button>
+    <button id="tabLadder" class="tab" title="Só o editor de degraus">Ladder</button>
+    <button id="tabPlant" class="tab" title="Planta animada e painel do operador">Planta</button>
+    <span class="sep"></span>
+    <span id="circuitTools" style="display:contents">
+      <button id="gridBtn" class="active">Grade</button>
+      <button id="labelsBtn" class="active">Rótulos</button>
+      <button id="legendBtn" class="active">Legenda</button>
+      <button id="wireNumBtn" class="active" title="Numeração automática dos fios (um número por rede)">Nº fios</button>
+      <span class="sep"></span>
+      <button id="zoomOut" title="Diminuir">−</button><span class="zoomlbl" id="zoomLbl">100%</span><button id="zoomIn" title="Aumentar">＋</button>
+      <button id="fitBtn" title="Enquadrar o diagrama">⤢<span class="lbl"> Ajustar</span></button>
+    </span>
+    <button id="focusBtn" title="Ocultar os painéis laterais para ampliar o diagrama (F)">⇔<span class="lbl"> Foco</span></button>
+    <span class="hint" id="modeHint">Modo: selecionar</span>
+  </div>
+  <div class="views split" id="views">
+    <canvas id="canvas"></canvas>
+    <div id="splitter" title="Arraste para ajustar o tamanho"></div>
+    <div id="ladderView"></div>
+    <div id="plantView"><canvas id="plantCanvas"></canvas></div>
+  </div>
+  <div id="tooltip"></div>
+  <div class="status" id="status">Pronto. Clique em ▶ Simular e mantenha o mouse pressionado sobre o botão S1.</div>
+</section>
+<aside class="right">
+  <div class="section"><h3>Propriedades</h3><div id="properties" class="note">Selecione um elemento para editar.</div></div>
+  <div class="section" id="plantSection" style="display:none"><h3>Planta (tanque)</h3>
+    <canvas id="plantMini" title="Clique para abrir a aba Planta"></canvas>
+    <label class="pf"><span>Nível inicial (%)</span><input id="plInit" type="number" min="0" max="100" step="1"></label>
+    <label class="pf"><span>Vazão da bomba (%/s)</span><input id="plFill" type="number" min="0" max="100" step="0.5"></label>
+    <label class="pf"><span>Vazão do dreno (%/s)</span><input id="plDrain" type="number" min="0" max="100" step="0.5"></label>
+  </div>
+  <div class="section"><h3>Folha de desenho</h3>
+    <label class="pf"><span>Título</span><input id="shTitle" type="text" maxlength="80" style="width:150px"></label>
+    <label class="pf"><span>Desenhado por</span><input id="shAuthor" type="text" maxlength="80" style="width:150px"></label>
+    <label class="pf"><span>Revisão</span><input id="shRev" type="text" maxlength="8"></label>
+    <div class="note">Use "Folha…" no topo para exportar em PNG ou PDF (A3) com lista de materiais e carimbo.</div>
+  </div>
+  <div class="section"><h3>Memória do CLP (Tags)</h3>
+    <div id="tagsView" class="tagsbox">—</div>
+  </div>
+  <div class="section"><h3>Telemetria da Simulação</h3>
+    <div class="metric"><div class="label">Estado</div><div id="simState" class="value">Parado</div></div>
+    <div class="metric"><div class="label">CLP</div><div id="plcState" class="value">—</div></div>
+    <div class="metric"><div class="label">Tensão na Fonte</div><div id="voltage" class="value">— V</div></div>
+    <div class="metric"><div class="label">Corrente Total (fontes)</div><div id="current" class="value">— A</div></div>
+  </div>
+</aside>
+</main>
+
+<script src="js/solver.js"></script>
+<script src="js/plc.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/geometry.js"></script>
+<script src="js/render.js"></script>
+<script src="js/ladder-ui.js"></script>
+<script src="js/plantview.js"></script>
+<script src="js/export.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
