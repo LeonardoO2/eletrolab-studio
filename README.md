@@ -1,4 +1,4 @@
-# EletroLab Studio — protótipo 0.11.0
+# EletroLab Studio — protótipo 0.11.2
 
 **Licença:** MIT. Consulte o arquivo `LICENSE` para os termos completos.
 

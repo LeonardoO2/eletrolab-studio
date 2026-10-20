@@ -21,7 +21,7 @@ Marque o escopo **repo** e copie o token. **Nunca coloque o token em arquivo do 
 
 ## 3) Publicar uma versão (toda atualização)
 1. Rode `npm test` (tudo deve passar).
-2. Aumente `"version"` no `package.json` (ex.: 0.11.0 → 0.12.0). Sem isso o programa instalado não enxerga a novidade.
+2. Aumente `"version"` no `package.json` (ex.: 0.11.0 → 0.12.0). Sem isso o programa instalado não enxerga a novidade. A janela do programa lê a versão daí; opcionalmente atualize também `VERSION` em `js/engine.js`, que só é gravada nos arquivos de projeto salvos.
 3. No PowerShell:
 ```
 npm install
@@ -35,7 +35,9 @@ npm run release
 ## 4) Como o usuário recebe
 - Primeira instalação: baixar o `.exe` da release e executar.
 - Depois: ao abrir o programa instalado, ele consulta o GitHub, baixa a versão nova e pergunta se quer reiniciar.
-- A atualização automática só funciona no programa **instalado** (não em `npm start`).
+- A atualização automática só funciona no programa **instalado** pelo `.exe` (não em `npm start`).
+- Para conferir: menu **Ajuda → Verificar atualizações…** mostra o resultado, e **Ajuda → Abrir registro de atualização** abre o `update.log` com os detalhes.
+- Teste de ponta a ponta: instale a versão N, publique a N+1 e abra o programa instalado (N); ele baixa e pergunta se quer reiniciar.
 
 ## Observações
 - Sem assinatura de código o Windows mostra o aviso do SmartScreen na instalação ("Mais informações → Executar assim mesmo").

@@ -3,7 +3,7 @@
 const Engine = (function () {
   const S = (typeof module !== 'undefined') ? require('./solver.js') : Solver;
   const P = (typeof module !== 'undefined') ? require('./plc.js') : PLC;
-  const VERSION = '0.11.0', SCHEMA = 2;
+  const VERSION = '0.11.2', SCHEMA = 2;
   const INPUT_ON = 12;   // V mínimos para nível alto em entrada do CLP
   const COIL_ON = 12;    // V mínimos para energizar bobina de relé
   const LOAD_ON = 12;    // V mínimos para a bomba funcionar e a válvula abrir

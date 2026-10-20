@@ -623,6 +623,10 @@ $('fileInput').onchange = e => {
 };
 
 // ---------- início ----------
+// A versão vem do próprio programa (package.json) quando roda no Electron; no navegador a etiqueta fica vazia.
+if (window.electronAPI && window.electronAPI.version) {
+  window.electronAPI.version().then(v => { $('appVer').textContent = '• v' + v; document.title = 'EletroLab Studio v' + v + ' - CLP & Ladder'; }).catch(() => {});
+}
 Engine.loadExample(world);
 LadderUI.init({ container: ladderView, getProgram: () => world.program, onStatus: setStatus, onHoverTag: t => setHoverTag(t, 'ladder') });
 setModeHint(); updateMetrics(); updateZoomLabel(); showView('split');
