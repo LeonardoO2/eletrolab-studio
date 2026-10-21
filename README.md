@@ -1,10 +1,23 @@
-# EletroLab Studio — protótipo 0.11.2
+# EletroLab Studio — protótipo 0.13.0
 
 **Licença:** MIT. Consulte o arquivo `LICENSE` para os termos completos.
 
 Aplicação desktop para Windows baseada em Electron, feita para **estudar comandos elétricos e programação de CLP (Ladder)**. Funciona localmente, sem internet depois de instalada.
 
-## Numeração de fios e referências cruzadas (novidade da 0.11.0)
+## Exemplo "Semáforo" (novidade da 0.13.0)
+No menu **Exemplos…** escolha **Semáforo (planta didática)**. S1 liga o ciclo (com selo) e S0 (NF) desliga e apaga tudo. Três sinaleiros coloridos (verde, amarelo, vermelho) ligados às saídas `%Q0.0` a `%Q0.2`.
+- **Um único temporizador:** T1 (TON de 12 s) reinicia sozinho (contato NF de `T1.DN`). Cada cor é uma **comparação** do acumulado `T1.ACC`: verde de 0 a 5 s, amarelo de 5 a 7 s, vermelho de 7 a 12 s. É um bom exemplo de como comparadores simplificam sequências.
+- **Aba Planta:** semáforo animado, barra de progresso do ciclo e um carro que para na faixa quando o sinal fecha. O mini cartão da lateral acompanha o mesmo desenho.
+- **Sinaleiros coloridos:** o sinaleiro tem a propriedade **Cor** (verde, amarelo, vermelho ou padrão) e a cor é gravada no projeto.
+- Ideias de exercício: encurtar o vermelho, incluir um botão de pedestre que antecipa o amarelo, ou fazer o amarelo piscar com um segundo temporizador.
+
+## Comparadores e contador regressivo (0.12.0)
+- **Comparação:** no Ladder, o botão **≷** de um contato troca o contato por uma comparação. A tag à esquerda (ex.: `C1.ACC`, `T1.ACC`) é comparada com um **número** ou com **outra tag** usando `>`, `<`, `≥`, `≤`, `=` ou `≠`. O botão `┤├` volta ao contato normal. Tags booleanas valem 1 (verdadeiro) e 0 (falso).
+- **CTD (contador regressivo):** parte do valor programado e desce 1 a cada subida do degrau, sem passar de 0. `NOME.DN` fica verdadeiro quando chega a 0. **CTR** volta o contador ao valor inicial (0 no CTU, o valor programado no CTD).
+- No exemplo **Contagem de peças**, o sinaleiro H1 também acende com `C1.ACC ≥ 4` (lote quase completo).
+- Limitações: ainda não há contas (somar, subtrair) nem tags numéricas livres para guardar valores.
+
+## Numeração de fios e referências cruzadas (0.11.0)
 - Botão **Nº fios** na barra do diagrama: cada rede elétrica (equipotencial) recebe um número, da esquerda para a direita. As redes dos trilhos +24V e 0V ficam sem número, pois já têm nome. Os números também saem na folha exportada (PNG/PDF).
 - **Referências cruzadas:** a bobina mostra em qual seção ficam os seus contatos (`→ Bomba`); cada contato mostra a seção da bobina (`← Comando K1`). Um contato sem bobina correspondente mostra `⚠ sem bobina`.
 - Limitações: a numeração é automática e recalculada a cada edição (não dá para fixar números manualmente) e as referências usam o nome da seção, não coordenadas de folha.

@@ -465,9 +465,10 @@ test('tanque: S0 desliga o automático e a bomba para', () => {
   near(w.plant.level, lv, 0.01, 'nível parado sem bomba nem dreno');
 });
 
+function trafficWorld() { const w = Engine.createWorld(); Engine.loadTrafficExample(w); return w; }
 function counterWorld() { const w = Engine.createWorld(); Engine.loadCounterExample(w); return w; }
 function motorWorld() { const w = Engine.createWorld(); Engine.loadMotorExample(w); return w; }
-[['tanque', tankWorld], ['motor', motorWorld], ['contador', counterWorld]].forEach(([nm, mk]) => {
+[['tanque', tankWorld], ['motor', motorWorld], ['contador', counterWorld], ['semaforo', trafficWorld]].forEach(([nm, mk]) => {
 test(nm + ': geometria — fios retos e ortogonais, terminam nos pinos e não atravessam componente alheio', () => {
   const w = mk();
   w.wires.forEach((x, i) => {
@@ -492,13 +493,14 @@ function segsCross(a, b, c, d) {
   return v0.x > Math.min(h0.x, h1.x) + E && v0.x < Math.max(h0.x, h1.x) - E && h0.y > Math.min(v0.y, v1.y) + E && h0.y < Math.max(v0.y, v1.y) - E;
 }
 
-test(nm + ': linhas lógicas do CLP (4 entradas, 2 saídas) terminam na linha da tag, não atravessam componentes nem se cruzam', () => {
+test(nm + ': linhas lógicas do CLP terminam na linha da tag, não atravessam componentes nem se cruzam', () => {
   const w = mk();
   const rows = Geometry.cpuRows(w), cpu = byType(w, 'plc_cpu');
-  assert.deepStrictEqual(rows.ins, ['%I0.0', '%I0.1', '%I0.2', '%I0.3']);
-  assert.deepStrictEqual(rows.outs, ['%Q0.0', '%Q0.1']);
+  const tagsOf = type => w.parts.filter(p => p.type === type).map(p => p.tag).sort();
+  assert.deepStrictEqual(rows.ins, tagsOf('plc_input'));
+  assert.deepStrictEqual(rows.outs, tagsOf('plc_output'));
   const mods = w.parts.filter(p => p.type === 'plc_input' || p.type === 'plc_output');
-  assert.strictEqual(mods.length, 6);
+  assert.strictEqual(mods.length, rows.ins.length + rows.outs.length);
   const links = mods.map(m => {
     const pts = Geometry.logicLink(w, m, rows), isIn = m.type === 'plc_input';
     assert.ok(pts && pts.length >= 2, 'sem ligação para ' + m.tag);
@@ -618,8 +620,9 @@ test('contagem de peças: 5 peças completam o lote, param a esteira, S1 zera e 
   const piece = () => { b3.closed = true; run(100); b3.closed = false; run(100); };
   piece(); assert.strictEqual(w.rt.tags['C1.ACC'], 0, 'esteira parada não conta');
   s1.closed = true; run(100); s1.closed = false; run(100); assert.ok(on(belt));
-  for (let i = 0; i < 4; i++) piece();
-  assert.strictEqual(w.rt.tags['C1.ACC'], 4); assert.ok(on(belt) && !on(h1));
+  for (let i = 0; i < 3; i++) piece();
+  assert.strictEqual(w.rt.tags['C1.ACC'], 3); assert.ok(on(belt) && !on(h1), 'com 3 peças ainda não avisa');
+  piece(); assert.strictEqual(w.rt.tags['C1.ACC'], 4); assert.ok(on(belt) && on(h1), 'a partir de 4 peças a comparação acende H1');
   piece(); run(100);
   assert.strictEqual(w.rt.tags['C1.DN'], true); assert.ok(!on(belt), 'lote completo para a esteira'); assert.ok(on(h1));
   s1.closed = true; run(100); s1.closed = false; run(100);
@@ -644,6 +647,57 @@ test('numeração de fios: um número por rede (sem trilhos) e referências cruz
   assert.strictEqual(Render.crossRef(w, named(w, 'Bomba P1')), '');
   const orphan = Engine.makePart(w, 'relay_no', 0, 0, { ref: 'K9', name: 'K9 (NA)' });
   assert.strictEqual(Render.crossRef(w, orphan), '⚠ sem bobina');
+});
+
+test('comparador e CTD: operadores, operando por tag, regressivo e CTR, saneamento', () => {
+  const rt = PLC.createRuntime(), prog = PLC.sanitizeProgram([
+    { cells: [{ contacts: [{ type: 'NO', tag: 'P' }] }], out: { type: 'ctd', tag: 'D1', preset: 3 } },
+    { cells: [{ contacts: [{ type: 'NO', tag: 'Z' }] }], out: { type: 'ctr', tag: 'D1' } },
+    { cells: [{ contacts: [{ type: 'CMP', tag: 'D1.ACC', op: '<=', value: 1 }] }], out: { type: 'coil', tag: 'LOW' } },
+    { cells: [{ contacts: [{ type: 'CMP', tag: 'D1.ACC', op: '==', value: 'LIM' }] }], out: { type: 'coil', tag: 'EQ' } },
+    { cells: [{ contacts: [{ type: 'CMP', tag: 'D1.ACC', op: '!=', value: 3 }] }], out: { type: 'coil', tag: 'NE' } }]);
+  const sc = () => PLC.scan(prog, rt, 20), pulse = () => { rt.tags.P = true; sc(); rt.tags.P = false; sc(); };
+  rt.tags.LIM = 2; rt.tags.P = false; sc();
+  assert.strictEqual(rt.tags['D1.ACC'], 3, 'começa no valor programado'); assert.strictEqual(rt.tags['D1.DN'], false);
+  assert.strictEqual(rt.tags.NE, false); assert.strictEqual(rt.tags.LOW, false);
+  pulse(); assert.strictEqual(rt.tags['D1.ACC'], 2); assert.strictEqual(rt.tags.EQ, true, 'compara com tag'); assert.strictEqual(rt.tags.NE, true);
+  pulse(); assert.strictEqual(rt.tags['D1.ACC'], 1); assert.strictEqual(rt.tags.LOW, true); assert.strictEqual(rt.tags.EQ, false);
+  pulse(); assert.strictEqual(rt.tags['D1.ACC'], 0); assert.strictEqual(rt.tags['D1.DN'], true, 'DN em zero');
+  pulse(); assert.strictEqual(rt.tags['D1.ACC'], 0, 'não fica negativo');
+  rt.tags.Z = true; sc(); assert.strictEqual(rt.tags['D1.ACC'], 3, 'CTR volta ao valor inicial'); assert.strictEqual(rt.tags['D1.DN'], false);
+  const s = PLC.sanitizeProgram([{ cells: [{ contacts: [{ type: 'CMP', tag: 'A', op: 'xx', value: '7' }, { type: 'CMP', tag: 'A', op: '>', value: '%%' }, { type: 'CMP', tag: 'A', op: '<', value: 'B.ACC' }] }], out: { type: 'ctd', tag: 'C', preset: 2 } }]);
+  assert.deepStrictEqual(s[0].cells[0].contacts.map(k => [k.op, k.value]), [['==', 7], ['>', 0], ['<', 'B.ACC']]);
+  assert.strictEqual(s[0].out.type, 'ctd');
+  const w = Engine.createWorld(); Engine.loadProject(w, JSON.parse(JSON.stringify({ schema: 2, parts: [], wires: [], program: s })));
+  assert.deepStrictEqual(Engine.serialize(w).program[0].cells[0].contacts[2], { type: 'CMP', tag: 'A', op: '<', value: 'B.ACC' });
+});
+
+test('semáforo: ciclo de 12 s (verde 0–5, amarelo 5–7, vermelho 7–12), reinicia e S0 apaga tudo', () => {
+  const w = trafficWorld(); Engine.start(w);
+  const run = ms => { for (let t = 0; t < ms; t += 20) Engine.step(w, 20); };
+  const lamp = c => w.parts.find(p => p.type === 'lamp' && p.color === c), on = c => Math.abs(lamp(c).simVoltage) > 12;
+  const state = () => ['green', 'yellow', 'red'].filter(on).join(',') || 'apagado';
+  assert.strictEqual(Engine.plantKind(w), 'traffic');
+  run(500); assert.strictEqual(state(), 'apagado', 'parado até apertar S1');
+  const s1 = named(w, 'S1 Liga'), s0 = named(w, 'S0 Para');
+  s1.closed = true; run(100); s1.closed = false;
+  run(2000); assert.strictEqual(state(), 'green');
+  run(3500); assert.strictEqual(state(), 'yellow', 'por volta de 5,7 s');
+  run(2000); assert.strictEqual(state(), 'red', 'por volta de 7,7 s');
+  run(4600); assert.strictEqual(state(), 'green', 'ciclo reiniciou (~12,3 s)');
+  s0.closed = false; run(100); s0.closed = true; run(100);
+  assert.strictEqual(state(), 'apagado', 'S0 desliga o ciclo'); assert.strictEqual(w.rt.tags['%M0.0'], false);
+});
+
+test('cor do sinaleiro: ida e volta, valor inválido ignorado e tipo de planta', () => {
+  const w = trafficWorld(), w2 = Engine.createWorld();
+  Engine.loadProject(w2, JSON.parse(JSON.stringify(Engine.serialize(w))));
+  assert.deepStrictEqual(w2.parts.filter(p => p.type === 'lamp').map(p => p.color), ['green', 'yellow', 'red']);
+  assert.strictEqual(Engine.plantKind(w2), 'traffic'); assert.strictEqual(Engine.hasPlantParts(w2), true);
+  const bad = Engine.serialize(w); bad.parts.forEach(p => { if (p.type === 'lamp') p.color = 'roxo'; });
+  const w3 = Engine.createWorld(); Engine.loadProject(w3, bad);
+  assert.ok(w3.parts.filter(p => p.type === 'lamp').every(p => p.color === '')); assert.strictEqual(Engine.plantKind(w3), null);
+  assert.strictEqual(Engine.plantKind(tankWorld()), 'tank'); assert.strictEqual(Engine.plantKind(motorWorld()), null);
 });
 
 test('Emergência e térmico (NF) cortam a carga; sensor indutivo (NA) liga', () => {

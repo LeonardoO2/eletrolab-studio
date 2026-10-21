@@ -64,11 +64,12 @@ function syncPlantFields() {
   set('plInit', pl.initial); set('plFill', pl.fillRate); set('plDrain', pl.drainRate);
 }
 function drawPlants() {
-  const has = Engine.hasPlantParts(world);
-  if (has !== plantShown) { plantShown = has; $('plantSection').style.display = has ? '' : 'none'; if (has) syncPlantFields(); }
+  const kind = Engine.plantKind(world), has = kind !== null;
+  if (kind !== plantShown) { plantShown = kind; $('plantSection').style.display = has ? '' : 'none'; document.querySelectorAll('#plantSection .pf').forEach(e => { e.style.display = kind === 'tank' ? '' : 'none'; }); if (has) syncPlantFields(); }
   if (currentView === 'plant') {
     const f = fitCanvas(plantCanvas); if (f) PlantView.draw(plantCanvas.getContext('2d'), f.w, f.h, f.d, st, false);
-  } else if (has) {
+  }
+  if (has) {
     const f = fitCanvas(plantMini); if (f) PlantView.draw(plantMini.getContext('2d'), f.w, f.h, f.d, st, true);
   }
 }
@@ -214,6 +215,13 @@ function renderProperties() {
       if (unit === '%' && (n < 0 || n > 100)) return 'Use um valor entre 0 e 100.';
       p.value = n; if (p.type === 'level_sw') { Engine.updateSensors(world); requestDraw(); }
     }, 'number');
+  }
+  if (p.type === 'lamp') {
+    const lab = document.createElement('label'); lab.className = 'pf'; lab.innerHTML = '<span>Cor do sinaleiro</span>';
+    const sel = document.createElement('select');
+    [['', 'Padrão'], ['green', 'Verde'], ['yellow', 'Amarelo'], ['red', 'Vermelho']].forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o); });
+    sel.value = p.color || ''; sel.onchange = () => { p.color = sel.value; plantShown = null; requestDraw(); };
+    lab.appendChild(sel); el.appendChild(lab);
   }
   if (HINTS[p.type]) { const n = document.createElement('div'); n.className = 'note'; n.textContent = HINTS[p.type]; el.appendChild(n); }
   if (p.type !== 'ground') {
@@ -583,6 +591,7 @@ const EXAMPLE_MSG = {
   partida: 'Exemplo carregado. Clique em ▶ Simular e mantenha o mouse pressionado sobre S1; veja também a aba Ladder.',
   motor: 'Exemplo do motor com proteção carregado. Clique em ▶ Simular e segure S1; depois clique no térmico F1 ou na emergência E0 para simular a falha e use S1 para reconhecer.',
   contador: 'Exemplo de contagem carregado. Simule, segure S1 para ligar a esteira e clique no sensor B3 para contar peças (5 completam o lote); veja os degraus na aba Ladder.',
+  semaforo: 'Exemplo do semáforo carregado. Clique em ▶ Simular, aperte S1 e veja as lâmpadas e a aba Planta; o ciclo todo (12 s) é controlado por um único temporizador T1 no Ladder.',
   tanque: 'Exemplo do tanque carregado. Clique em ▶ Simular, aperte S1 e use S2 para consumir água; veja a aba Planta.'
 };
 $('exampleSel').onchange = e => {

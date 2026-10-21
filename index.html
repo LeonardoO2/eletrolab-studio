@@ -99,6 +99,10 @@ aside.right .section{margin-bottom:20px}aside.right .section:last-child{margin-b
 .outcard.lit .coil,.outcard.lit .tbox{border-color:var(--accent);color:var(--accent);background:rgba(67,198,172,.14)}
 .outcard select{padding:2px 4px;font-size:12px}
 .preset{width:64px;padding:2px 6px;font-size:12px}
+.cmpbox{display:flex;align-items:center;gap:2px;border:3px solid var(--plc);border-radius:4px;padding:2px 3px;background:var(--panel2)}
+.contact.lit .cmpbox{border-color:var(--accent);background:rgba(67,198,172,.14)}
+.cmpop{padding:1px 2px;font-size:13px;font-weight:700;width:38px}
+.cmpval{width:52px;padding:2px 4px;font-family:Consolas,monospace;font-size:12px;text-align:center}
 .add-rung{margin-top:4px}
 /* destaque cruzado: a mesma tag acesa no diagrama e no Ladder */
 .contact.hl .tag-in,.outcard.hl .tag-in{border-color:var(--warn);box-shadow:0 0 0 2px rgba(246,200,95,.35)}
@@ -109,7 +113,7 @@ aside.right .section{margin-bottom:20px}aside.right .section:last-child{margin-b
 <header>
   <div><div class="brand">Eletro<span>Lab</span> Studio</div><div class="sub">Automação & CLP (Ladder) <span id="appVer"></span></div></div>
   <div class="toolbar">
-    <button id="newBtn">Novo</button><select id="exampleSel" title="Carregar um exemplo pronto"><option value="">Exemplos…</option><option value="partida">Partida com CLP</option><option value="motor">Motor com proteção (E0, F1)</option><option value="contador">Contagem de peças (CTU)</option><option value="tanque">Tanque (planta didática)</option></select>
+    <button id="newBtn">Novo</button><select id="exampleSel" title="Carregar um exemplo pronto"><option value="">Exemplos…</option><option value="partida">Partida com CLP</option><option value="motor">Motor com proteção (E0, F1)</option><option value="contador">Contagem de peças (CTU)</option><option value="semaforo">Semáforo (planta didática)</option><option value="tanque">Tanque (planta didática)</option></select>
     <button id="simBtn" class="primary">▶ Simular</button><button id="stopBtn">■ Parar</button>
     <select id="exportSel" title="Exportar a folha de desenho"><option value="">Folha…</option><option value="png">Folha em PNG</option><option value="pdf">Folha em PDF</option></select><button id="saveBtn">Exportar JSON</button><button id="loadBtn">Abrir JSON</button><input id="fileInput" type="file" accept=".json,application/json" hidden>
   </div>
@@ -195,7 +199,7 @@ aside.right .section{margin-bottom:20px}aside.right .section:last-child{margin-b
 </section>
 <aside class="right">
   <div class="section"><h3>Propriedades</h3><div id="properties" class="note">Selecione um elemento para editar.</div></div>
-  <div class="section" id="plantSection" style="display:none"><h3>Planta (tanque)</h3>
+  <div class="section" id="plantSection" style="display:none"><h3>Planta didática</h3>
     <canvas id="plantMini" title="Clique para abrir a aba Planta"></canvas>
     <label class="pf"><span>Nível inicial (%)</span><input id="plInit" type="number" min="0" max="100" step="1"></label>
     <label class="pf"><span>Vazão da bomba (%/s)</span><input id="plFill" type="number" min="0" max="100" step="0.5"></label>

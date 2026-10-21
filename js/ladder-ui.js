@@ -35,7 +35,7 @@ const LadderUI = (function () {
   }
 
   const isTimerType = t => t === 'ton' || t === 'tof';
-  const isCounterType = t => t === 'ctu' || t === 'ctr';
+  const isCounterType = t => t === 'ctu' || t === 'ctd' || t === 'ctr';
   function nextName(prog, prefix, types) {
     const used = new Set(prog.filter(r => r.out && types.includes(r.out.type)).map(r => r.out.tag));
     let n = 1;
@@ -77,14 +77,30 @@ const LadderUI = (function () {
   function buildContact(rung, cell, ci, c, ki) {
     const box = el('div', 'contact');
     box.dataset.tag = c.tag; hoverable(box, () => c.tag);
+    const cmp = c.type === 'CMP';
     const tr = el('div', 'tagrow');
-    tr.appendChild(tagInput(c.tag, 'Tag lida por este contato', PLC.tagError, v => { c.tag = v; box.dataset.tag = v; }));
+    tr.appendChild(tagInput(c.tag, cmp ? 'Valor comparado (tag numérica, ex.: C1.ACC ou T1.ACC)' : 'Tag lida por este contato', PLC.tagError, v => { c.tag = v; box.dataset.tag = v; }));
     const sr = el('div', 'symrow');
-    const sb = el('button', 'symbtn' + (c.type === 'NC' ? ' nc' : ''));
-    sb.title = c.type === 'NC' ? 'Contato NF: clique para trocar para NA' : 'Contato NA: clique para trocar para NF';
-    sb.append(el('i'), el('i'));
-    sb.onclick = () => { c.type = c.type === 'NC' ? 'NO' : 'NC'; render(); };
-    sr.append(el('span', 'cl'), sb, el('span', 'cl'));
+    if (cmp) {
+      const cb = el('div', 'cmpbox');
+      const op = el('select', 'cmpop');
+      [['>', '>'], ['<', '<'], ['>=', '≥'], ['<=', '≤'], ['==', '='], ['!=', '≠']].forEach(([v, t]) => { const o = el('option', '', t); o.value = v; op.appendChild(o); });
+      op.value = c.op; op.title = 'Operador de comparação';
+      op.onchange = () => { c.op = op.value; };
+      const val = el('input', 'cmpval'); val.value = c.value; val.spellcheck = false; val.title = 'Número ou nome de tag';
+      val.onchange = () => {
+        const nv = PLC.cmpValue(val.value.trim());
+        if (String(nv) !== val.value.trim()) status('Valor inválido: use um número ou uma tag. Foi usado ' + nv + '.', true);
+        c.value = nv; val.value = nv;
+      };
+      cb.append(op, val); sr.append(el('span', 'cl'), cb, el('span', 'cl'));
+    } else {
+      const sb = el('button', 'symbtn' + (c.type === 'NC' ? ' nc' : ''));
+      sb.title = c.type === 'NC' ? 'Contato NF: clique para trocar para NA' : 'Contato NA: clique para trocar para NF';
+      sb.append(el('i'), el('i'));
+      sb.onclick = () => { c.type = c.type === 'NC' ? 'NO' : 'NC'; render(); };
+      sr.append(el('span', 'cl'), sb, el('span', 'cl'));
+    }
     const fr = el('div', 'footrow');
     const del = el('button', 'mini', '×'); del.title = 'Remover contato';
     del.onclick = () => {
@@ -93,6 +109,13 @@ const LadderUI = (function () {
       render();
     };
     fr.appendChild(del);
+    const tg = el('button', 'mini add', cmp ? '┤├' : '≷'); tg.title = cmp ? 'Voltar para contato NA/NF' : 'Trocar por comparação (ex.: C1.ACC ≥ 3)';
+    tg.onclick = () => {
+      if (cmp) { c.type = 'NO'; delete c.op; delete c.value; }
+      else { c.type = 'CMP'; c.op = '>='; c.value = 1; }
+      render();
+    };
+    fr.appendChild(tg);
     if (ki === cell.contacts.length - 1) {
       const par = el('button', 'mini add', '＋ ∥'); par.title = 'Adicionar contato em paralelo (OU) nesta coluna';
       par.onclick = () => { cell.contacts.push({ type: 'NO', tag: '%M0.0' }); render(); };
@@ -103,18 +126,18 @@ const LadderUI = (function () {
   }
 
   function buildOutput(prog, out) {
-    const timer = isTimerType(out.type), counter = isCounterType(out.type), named = timer || counter, preset = timer || out.type === 'ctu';
+    const timer = isTimerType(out.type), counter = isCounterType(out.type), named = timer || counter, preset = timer || out.type === 'ctu' || out.type === 'ctd';
     const oc = el('div', 'outcard');
     oc.dataset.tag = out.tag; hoverable(oc, () => out.tag);
     const tr = el('div', 'tagrow');
-    tr.appendChild(tagInput(out.tag, timer ? 'Nome do temporizador' : out.type === 'ctu' ? 'Nome do contador' : out.type === 'ctr' ? 'Contador a zerar (nome)' : 'Tag escrita pelo degrau',
+    tr.appendChild(tagInput(out.tag, timer ? 'Nome do temporizador' : (out.type === 'ctu' || out.type === 'ctd') ? 'Nome do contador' : out.type === 'ctr' ? 'Contador a zerar (nome)' : 'Tag escrita pelo degrau',
       v => PLC.outTagError(out.type, v), v => { out.tag = v; oc.dataset.tag = v; }));
     const sr = el('div', 'osym');
     if (named) sr.appendChild(el('div', 'tbox', out.type.toUpperCase()));
     else sr.appendChild(el('div', 'coil', out.type === 'set' ? 'S' : out.type === 'reset' ? 'R' : ''));
     const fr = el('div', 'footrow');
     const sel = el('select');
-    [['coil', 'Bobina ( )'], ['set', 'Set (S)'], ['reset', 'Reset (R)'], ['ton', 'TON'], ['tof', 'TOF'], ['ctu', 'CTU (contador)'], ['ctr', 'CTR (zera contador)']].forEach(([v, t]) => {
+    [['coil', 'Bobina ( )'], ['set', 'Set (S)'], ['reset', 'Reset (R)'], ['ton', 'TON'], ['tof', 'TOF'], ['ctu', 'CTU (contador)'], ['ctd', 'CTD (regressivo)'], ['ctr', 'CTR (zera contador)']].forEach(([v, t]) => {
       const o = el('option', '', t); o.value = v; sel.appendChild(o);
     });
     sel.value = out.type;
@@ -122,9 +145,9 @@ const LadderUI = (function () {
       const nt = sel.value, wasType = out.type;
       out.type = nt;
       if (isTimerType(nt) && !isTimerType(wasType)) { out.tag = nextName(prog, 'T', ['ton', 'tof']); out.preset = 1000; }
-      else if (nt === 'ctu' && wasType !== 'ctu') { out.tag = nextName(prog, 'C', ['ctu']); out.preset = 5; }
+      else if ((nt === 'ctu' || nt === 'ctd') && wasType !== 'ctu' && wasType !== 'ctd') { out.tag = nextName(prog, 'C', ['ctu', 'ctd']); out.preset = 5; }
       else if (nt === 'ctr' && wasType !== 'ctr') {
-        const first = prog.find(r => r !== undefined && r.out && r.out.type === 'ctu');
+        const first = prog.find(r => r.out && (r.out.type === 'ctu' || r.out.type === 'ctd'));
         out.tag = first ? first.out.tag : 'C1';
       }
       else if (!isTimerType(nt) && !isCounterType(nt) && (isTimerType(wasType) || isCounterType(wasType))) out.tag = '%M0.0';
@@ -133,7 +156,7 @@ const LadderUI = (function () {
     fr.appendChild(sel);
     if (preset) {
       const pre = el('input', 'preset');
-      pre.type = 'number'; pre.min = '0'; pre.step = timer ? '100' : '1'; pre.value = out.preset; pre.title = timer ? 'Tempo programado (ms)' : 'Contagem programada';
+      pre.type = 'number'; pre.min = '0'; pre.step = timer ? '100' : '1'; pre.value = out.preset; pre.title = timer ? 'Tempo programado (ms)' : out.type === 'ctd' ? 'Valor inicial (desce até 0)' : 'Contagem programada';
       pre.onchange = () => { out.preset = Math.max(0, Number(pre.value) || 0); pre.value = out.preset; };
       fr.appendChild(pre);
     }
@@ -151,7 +174,7 @@ const LadderUI = (function () {
     host.appendChild(el('div', 'ladder-intro',
       'Cada degrau é lido da esquerda para a direita, do trilho esquerdo ao direito. Contatos em série formam um E (AND); ' +
       'contatos empilhados na mesma coluna (∥) formam um OU. Clique no símbolo para alternar NA (┤ ├) e NF (┤/├). ' +
-      'Tags: %I0.0 (entrada), %Q0.0 (saída), %M0.0 (memória) ou nomes livres. Temporizadores geram NOME.DN. ' +
+      'Tags: %I0.0 (entrada), %Q0.0 (saída), %M0.0 (memória) ou nomes livres. Temporizadores e contadores geram NOME.DN e NOME.ACC; o botão ≷ troca um contato por uma comparação (ex.: C1.ACC ≥ 3). ' +
       'Durante a simulação, a linha verde mostra por onde passa a "energia" do degrau.'));
 
     prog.forEach((rung, ri) => {

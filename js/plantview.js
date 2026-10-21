@@ -15,6 +15,8 @@ const PlantView = (function () {
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const byType = (world, ...types) => world.parts.filter(p => types.includes(p.type));
   const hasPlant = world => Engine.hasPlantParts(world);
+  const LAMP = { '': ['#ffd666', '255,214,102'], yellow: ['#ffd666', '255,214,102'], red: ['#ff6b6b', '255,90,90'], green: ['#5ddc8a', '90,220,130'] };
+  const car = { x: 40, last: 0 };                              // carro animado da cena do semáforo
 
   function rrect(ctx, x, y, w, h, r) {
     r = Math.min(r, w / 2, h / 2);
@@ -152,6 +154,57 @@ const PlantView = (function () {
     });
   }
 
+  // ---------- cena do semáforo ----------
+  function drawTraffic(ctx, o) {
+    const { world, run, t, compact } = o, fs = compact ? 1.25 : 1;
+    const lamps = c => world.parts.find(p => p.type === 'lamp' && p.color === c);
+    const on = c => { const p = lamps(c); return !!(run && p && Math.abs(p.simVoltage) > 2); };
+    const red = on('red'), yel = on('yellow'), grn = on('green');
+    const ROAD = { y: 236, h: 56 }, STOP = 168;
+
+    // via, faixa de pedestres e linha de retenção
+    ctx.fillStyle = '#26323f'; ctx.fillRect(0, ROAD.y, SW, ROAD.h);
+    ctx.strokeStyle = 'rgba(234,241,248,.55)'; ctx.lineWidth = 2; ctx.setLineDash([14, 12]);
+    ctx.beginPath(); ctx.moveTo(0, ROAD.y + ROAD.h / 2); ctx.lineTo(SW, ROAD.y + ROAD.h / 2); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(234,241,248,.8)'; for (let y = ROAD.y + 4; y < ROAD.y + ROAD.h - 6; y += 12) ctx.fillRect(STOP + 14, y, 30, 7);
+    ctx.fillStyle = '#eaf1f8'; ctx.fillRect(STOP, ROAD.y, 4, ROAD.h / 2);
+
+    // carro: para antes da linha com vermelho (ou amarelo, se ainda estiver longe) e anda com verde
+    const dt = run ? Math.min(0.1, Math.max(0, (t - car.last) / 1000)) : 0; car.last = t;
+    if (!run) car.x = 40;
+    else {
+      const front = car.x + 44, dist = STOP - 6 - front, mustStop = (red || (yel && dist > 26)) && dist > -2 && dist < 80;
+      const speed = mustStop ? Math.max(0, Math.min(90, dist * 4)) : 90;
+      car.x += speed * dt; if (car.x > SW + 10) car.x = -60;
+    }
+    const cy = ROAD.y + ROAD.h / 2 + 5;
+    ctx.fillStyle = '#6ea8fe'; rrect(ctx, car.x, cy, 44, 18, 5); ctx.fill();
+    ctx.fillStyle = '#9cc4ff'; rrect(ctx, car.x + 10, cy - 8, 22, 11, 4); ctx.fill();
+    ctx.fillStyle = '#111923'; [10, 34].forEach(dx => { ctx.beginPath(); ctx.arc(car.x + dx, cy + 18, 4.5, 0, Math.PI * 2); ctx.fill(); });
+
+    // poste e caixa do semáforo
+    const px = 256;
+    ctx.fillStyle = C.pipe; ctx.fillRect(px - 3, 150, 6, ROAD.y - 150);
+    rrect(ctx, px - 26, 20, 52, 132, 10); ctx.fillStyle = '#0e1620'; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = C.tank; ctx.stroke();
+    [['red', red, 52], ['yellow', yel, 86], ['green', grn, 120]].forEach(([c, lit, y]) => {
+      const col = LAMP[c];
+      if (lit) { const g = ctx.createRadialGradient(px, y, 4, px, y, 30); g.addColorStop(0, 'rgba(' + col[1] + ',.8)'); g.addColorStop(1, 'rgba(' + col[1] + ',0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(px, y, 30, 0, Math.PI * 2); ctx.fill(); }
+      ctx.beginPath(); ctx.arc(px, y, 13, 0, Math.PI * 2); ctx.fillStyle = lit ? col[0] : 'rgba(' + col[1] + ',.14)'; ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = lit ? '#fff' : 'rgba(' + col[1] + ',.45)'; ctx.stroke();
+    });
+
+    // estado e relógio do ciclo (primeiro temporizador do programa)
+    const state = !run ? 'PARADO' : red ? 'VERMELHO' : yel ? 'AMARELO' : grn ? 'VERDE' : 'DESLIGADO';
+    text(ctx, state, 105, 52, 15 * fs, red ? LAMP.red[0] : yel ? LAMP.yellow[0] : grn ? LAMP.green[0] : C.muted, 'center', true);
+    const ton = world.program.find(r => r.out && r.out.type === 'ton');
+    if (ton) {
+      const tm = world.rt.timers && world.rt.timers[ton.out.tag], acc = run && tm ? tm.acc : 0, pre = Math.max(1, Number(ton.out.preset) || 1);
+      text(ctx, ton.out.tag + '  ' + (acc / 1000).toFixed(1) + ' / ' + (pre / 1000).toFixed(0) + ' s', 105, 76, 11 * fs, C.text, 'center');
+      ctx.fillStyle = '#0e1620'; rrect(ctx, 25, 86, 160, 8, 4); ctx.fill();
+      ctx.fillStyle = C.accent; if (acc > 0) { rrect(ctx, 25, 86, Math.max(8, 160 * Math.min(1, acc / pre)), 8, 4); ctx.fill(); }
+    }
+  }
+
   // ---------- painel do operador ----------
   const PANEL_W = 290;
   function panelLayout(world) {
@@ -176,10 +229,10 @@ const PlantView = (function () {
     if (L.lamps.length) {
       text(ctx, 'SINALEIROS', 0, L.lampLabel, 10, C.muted, 'left', true);
       L.lamps.forEach(({ p, y }) => {
-        const on = run && Math.abs(p.simVoltage) > 2;
-        if (on) { const g = ctx.createRadialGradient(12, y, 3, 12, y, 22); g.addColorStop(0, 'rgba(255,214,102,.7)'); g.addColorStop(1, 'rgba(255,214,102,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(12, y, 22, 0, Math.PI * 2); ctx.fill(); }
-        ctx.beginPath(); ctx.arc(12, y, 10, 0, Math.PI * 2); ctx.fillStyle = on ? '#ffd666' : '#111923'; ctx.fill();
-        ctx.lineWidth = 2; ctx.strokeStyle = on ? '#ffe9a8' : C.muted; ctx.stroke();
+        const on = run && Math.abs(p.simVoltage) > 2, lc = LAMP[p.color] || LAMP[''];
+        if (on) { const g = ctx.createRadialGradient(12, y, 3, 12, y, 22); g.addColorStop(0, 'rgba(' + lc[1] + ',.7)'); g.addColorStop(1, 'rgba(' + lc[1] + ',0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(12, y, 22, 0, Math.PI * 2); ctx.fill(); }
+        ctx.beginPath(); ctx.arc(12, y, 10, 0, Math.PI * 2); ctx.fillStyle = on ? lc[0] : '#111923'; ctx.fill();
+        ctx.lineWidth = 2; ctx.strokeStyle = on ? '#fff' : C.muted; ctx.stroke();
         text(ctx, p.name, 32, y + 4, 12, on ? C.white : C.text, 'left', on);
       });
     }
@@ -209,17 +262,17 @@ const PlantView = (function () {
   function draw(ctx, W, H, dpr, st, compact) {
     const world = st.world, run = !!(st.running && world.sim.ok), t = st.time || 0;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
-    last = { buttons: [] };
+    if (!compact) last = { buttons: [] };                       // o mini cartão não apaga os botões da vista completa
     if (!hasPlant(world)) {
       text(ctx, 'Este projeto não tem componentes de planta.', W / 2, H / 2 - 6, compact ? 11 : 15, C.text, 'center', true);
       text(ctx, compact ? 'Use o exemplo Tanque.' : 'Carregue o exemplo "Tanque" ou adicione sensor de nível, bomba e válvula pela paleta.', W / 2, H / 2 + (compact ? 10 : 16), compact ? 10 : 12, C.muted, 'center');
       return;
     }
-    const o = { world, run, t, compact, everPressed: st.everPressed };
+    const o = { world, run, t, compact, everPressed: st.everPressed, kind: Engine.plantKind(world) };
     if (compact) {
       const s = Math.min(W / SW, H / SH), ox = (W - SW * s) / 2, oy = (H - SH * s) / 2;
       ctx.setTransform(dpr * s, 0, 0, dpr * s, dpr * ox, dpr * oy);
-      drawScene(ctx, o);
+      (o.kind === 'traffic' ? drawTraffic : drawScene)(ctx, o);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       return;
     }
@@ -227,7 +280,7 @@ const PlantView = (function () {
     const s = clamp(Math.min(W / LW, H / LH), 0.45, 1.8), ox = (W - LW * s) / 2, oy = (H - LH * s) / 2;
     const px = 20 + SW + 30, py = 20;
     ctx.setTransform(dpr * s, 0, 0, dpr * s, dpr * ox, dpr * oy);
-    ctx.save(); ctx.translate(20, 20 + Math.max(0, (LH - 40 - SH) / 2 * 0)); drawScene(ctx, o); ctx.restore();
+    ctx.save(); ctx.translate(20, 20); (o.kind === 'traffic' ? drawTraffic : drawScene)(ctx, o); ctx.restore();
     ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(px - 15, 20); ctx.lineTo(px - 15, LH - 20); ctx.stroke();
     ctx.save(); ctx.translate(px, py); drawPanel(ctx, o, L); ctx.restore();
     L.pushes.forEach(({ p, y }) => {

@@ -3,7 +3,7 @@
 const Engine = (function () {
   const S = (typeof module !== 'undefined') ? require('./solver.js') : Solver;
   const P = (typeof module !== 'undefined') ? require('./plc.js') : PLC;
-  const VERSION = '0.11.2', SCHEMA = 2;
+  const VERSION = '0.13.0', SCHEMA = 2;
   const INPUT_ON = 12;   // V mínimos para nível alto em entrada do CLP
   const COIL_ON = 12;    // V mínimos para energizar bobina de relé
   const LOAD_ON = 12;    // V mínimos para a bomba funcionar e a válvula abrir
@@ -37,7 +37,14 @@ const Engine = (function () {
   };
   const LATCH_TYPES = ['estop', 'thermal', 'sensor_ind'];
   const PLANT_TYPES = ['level_sw', 'pump', 'valve'];
-  const hasPlantParts = w => w.parts.some(p => PLANT_TYPES.includes(p.type));
+  const LAMP_COLORS = ['red', 'yellow', 'green'];
+  // Tipo de planta didática do projeto: 'tank' (sensor, bomba ou válvula), 'traffic' (sinaleiros vermelho e verde) ou null.
+  function plantKind(w) {
+    if (w.parts.some(p => PLANT_TYPES.includes(p.type))) return 'tank';
+    const cs = w.parts.filter(p => p.type === 'lamp').map(p => p.color);
+    return cs.includes('red') && cs.includes('green') ? 'traffic' : null;
+  }
+  const hasPlantParts = w => plantKind(w) !== null;
 
   // Planta didática: um tanque. Níveis e vazões em % (do tanque cheio) e % por segundo.
   const defaultPlant = () => ({ initial: 10, fillRate: 5, drainRate: 7, level: 10, pumping: false, draining: false, overflow: false });
@@ -67,7 +74,7 @@ const Engine = (function () {
 
   function blank(type) {
     const d = DEFAULTS[type];
-    return { id: 0, type, x: 0, y: 0, rotation: 0, name: d.name, value: d.value, tag: '', ref: '', len: d.len || 0,
+    return { id: 0, type, x: 0, y: 0, rotation: 0, name: d.name, value: d.value, tag: '', ref: '', color: '', len: d.len || 0,
              closed: d.nc === true, energized: false, outOn: false, simVoltage: 0, simCurrent: 0 };
   }
 
@@ -188,7 +195,7 @@ const Engine = (function () {
   function serialize(w) {
     return {
       app: 'EletroLab Studio', version: VERSION, schema: SCHEMA, nextId: w.nextId,
-      parts: w.parts.map(p => ({ id: p.id, type: p.type, x: p.x, y: p.y, rotation: p.rotation, name: p.name, value: p.value, tag: p.tag, ref: p.ref, len: p.len })),
+      parts: w.parts.map(p => ({ id: p.id, type: p.type, x: p.x, y: p.y, rotation: p.rotation, name: p.name, value: p.value, tag: p.tag, ref: p.ref, len: p.len, color: p.color || undefined })),
       wires: w.wires.map(x => ({ a: { id: x.a.id, pin: x.a.pin }, b: { id: x.b.id, pin: x.b.pin } })),
       zones: w.zones.map(z => ({ id: z.id, x: z.x, y: z.y, w: z.w, h: z.h, label: z.label })),
       plant: { initial: w.plant.initial, fillRate: w.plant.fillRate, drainRate: w.plant.drainRate },
@@ -208,6 +215,7 @@ const Engine = (function () {
       p.name = String(o.name != null ? o.name : p.name); p.value = Number(o.value);
       if (!isFinite(p.value)) p.value = DEFAULTS[o.type].value;
       p.tag = String(o.tag || ''); p.ref = String(o.ref || '');
+      if (o.type === 'lamp' && LAMP_COLORS.includes(o.color)) p.color = o.color;
       if (DEFAULTS[o.type].len) {
         let len = Math.round(Number(o.len) || DEFAULTS[o.type].len);
         len = Math.max(2, Math.min(80, len)); if (len % 2) len += 1;
@@ -394,9 +402,68 @@ const Engine = (function () {
       { comment: 'Novo lote: e libera a esteira (limpa %M0.1)',
         cells: [{ contacts: [c('NO', '%I0.1')] }, { contacts: [c('NO', '%M0.1')] }],
         out: { type: 'reset', tag: '%M0.1', preset: 0 } },
-      { comment: 'Sinaleiro H1 indica lote completo',
-        cells: [{ contacts: [c('NO', '%M0.1')] }],
+      { comment: 'Sinaleiro H1: acende com o lote completo ou quase completo (comparação C1.ACC ≥ 4)',
+        cells: [{ contacts: [c('NO', '%M0.1'), { type: 'CMP', tag: 'C1.ACC', op: '>=', value: 4 }] }],
         out: { type: 'coil', tag: '%Q0.1', preset: 0 } }
+    ];
+    resetStates(w);
+  }
+
+  // Semáforo: um único temporizador (ciclo de 12 s) e comparações decidem qual lâmpada acende:
+  // verde de 0 a 5 s, amarelo de 5 a 7 s e vermelho de 7 a 12 s.
+  function loadTrafficExample(w) {
+    clear(w);
+    const TOP = 80, BOT = 470, LEN = 52, RX = 560;
+    const top = makePart(w, 'rail_pos', RX, TOP, { rotation: 90, len: LEN, name: '+24V' });
+    const bot = makePart(w, 'rail_neg', RX, BOT, { rotation: 90, len: LEN, name: '0V' });
+    const R = (rail, X) => ({ id: rail.id, pin: rail.len / 2 + (rail.x - X) / 20 });
+    const pin = (p, i) => ({ id: p.id, pin: i });
+    const link = (a, b) => w.wires.push({ a, b });
+    const V = (type, x, y, o) => makePart(w, type, x, y, Object.assign({ rotation: 90 }, o));
+
+    const src = V('source', 80, 280, { rotation: 270, name: 'Fonte' });
+    const s0 = V('push_nc', 220, 170, { name: 'S0 Para' });
+    const in0 = V('plc_input', 220, 290, { name: 'Entrada I0.0', tag: '%I0.0' });
+    const s1 = V('push_no', 340, 170, { name: 'S1 Liga' });
+    const in1 = V('plc_input', 340, 330, { name: 'Entrada I0.1', tag: '%I0.1' });
+    const cpu = makePart(w, 'plc_cpu', 580, 240, { name: 'CLP' });
+    const outs = [['Saída Q0.0', '%Q0.0', 760, 'Verde', 'green'], ['Saída Q0.1', '%Q0.1', 880, 'Amarelo', 'yellow'], ['Saída Q0.2', '%Q0.2', 1000, 'Vermelho', 'red']]
+      .map(([n, tag, x, ln, color]) => ({ x, out: V('plc_output', x, 170, { name: n, tag }), lamp: V('lamp', x, 300, { name: ln, color }) }));
+
+    link(pin(src, 1), R(top, 80)); link(pin(src, 0), R(bot, 80));
+    [[s0, in0, 220], [s1, in1, 340]].forEach(([sw, inp, X]) => {
+      link(R(top, X), pin(sw, 0)); link(pin(sw, 1), pin(inp, 0)); link(pin(inp, 1), R(bot, X));
+    });
+    link(R(top, 580), pin(cpu, 0)); link(pin(cpu, 1), R(bot, 580));
+    outs.forEach(({ x, out, lamp }) => {
+      link(R(top, x), pin(out, 0)); link(pin(out, 1), pin(lamp, 0)); link(pin(lamp, 1), R(bot, x));
+    });
+
+    makeZone(w, 44, 48, 96, 450, 'Fonte');
+    makeZone(w, 180, 48, 250, 450, 'Comando');
+    makeZone(w, 436, 48, 260, 450, 'CLP');
+    makeZone(w, 700, 48, 120, 450, 'Verde');
+    makeZone(w, 824, 48, 120, 450, 'Amarelo');
+    makeZone(w, 948, 48, 120, 450, 'Vermelho');
+
+    const c = (type, tag) => ({ type, tag });
+    const cmp = (op, value) => ({ type: 'CMP', tag: 'T1.ACC', op, value });
+    w.program = [
+      { comment: 'Liga/desliga o ciclo com selo: S1 (%I0.1) liga; S0 (%I0.0, NF físico) desliga',
+        cells: [{ contacts: [c('NO', '%I0.1'), c('NO', '%M0.0')] }, { contacts: [c('NO', '%I0.0')] }],
+        out: { type: 'coil', tag: '%M0.0', preset: 0 } },
+      { comment: 'Relógio do ciclo: T1 conta de 0 a 12 s e reinicia sozinho (NC T1.DN)',
+        cells: [{ contacts: [c('NO', '%M0.0')] }, { contacts: [c('NC', 'T1.DN')] }],
+        out: { type: 'ton', tag: 'T1', preset: 12000 } },
+      { comment: 'Verde: de 0 a 5 s do ciclo (T1.ACC < 5000)',
+        cells: [{ contacts: [c('NO', '%M0.0')] }, { contacts: [cmp('<', 5000)] }],
+        out: { type: 'coil', tag: '%Q0.0', preset: 0 } },
+      { comment: 'Amarelo: de 5 s a 7 s',
+        cells: [{ contacts: [c('NO', '%M0.0')] }, { contacts: [cmp('>=', 5000)] }, { contacts: [cmp('<', 7000)] }],
+        out: { type: 'coil', tag: '%Q0.1', preset: 0 } },
+      { comment: 'Vermelho: de 7 s até o fim do ciclo',
+        cells: [{ contacts: [c('NO', '%M0.0')] }, { contacts: [cmp('>=', 7000)] }],
+        out: { type: 'coil', tag: '%Q0.2', preset: 0 } }
     ];
     resetStates(w);
   }
@@ -478,9 +545,9 @@ const Engine = (function () {
     resetStates(w);
   }
 
-  const EXAMPLES = { partida: loadExample, motor: loadMotorExample, contador: loadCounterExample, tanque: loadTankExample };
+  const EXAMPLES = { partida: loadExample, motor: loadMotorExample, contador: loadCounterExample, tanque: loadTankExample, semaforo: loadTrafficExample };
 
-  return { DEFAULTS, VERSION, CPU_W, CPU_H, PLANT_TYPES, LATCH_TYPES, sanitizeSheet, EXAMPLES, loadMotorExample, loadCounterExample, pinLocal, createWorld, makePart, makeZone, clear, start, stop, step,
+  return { DEFAULTS, VERSION, CPU_W, CPU_H, PLANT_TYPES, LAMP_COLORS, plantKind, LATCH_TYPES, sanitizeSheet, EXAMPLES, loadMotorExample, loadCounterExample, loadTrafficExample, pinLocal, createWorld, makePart, makeZone, clear, start, stop, step,
            solveElectric, cpuPowered, serialize, loadProject, loadExample, loadTankExample, hasPlantParts, sanitizePlant, updateSensors };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;

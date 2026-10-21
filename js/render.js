@@ -299,6 +299,7 @@ const Render = (function () {
     ctx.beginPath(); ctx.moveTo(-38, 0); ctx.lineTo(-a, 0); ctx.moveTo(38, 0); ctx.lineTo(b, 0); ctx.stroke();
   }
 
+  const LAMP_RGB = { '': '255,214,102', yellow: '255,214,102', red: '255,90,90', green: '90,220,130' };
   function drawSwitch(ctx, closed, push, accent) {
     leads(ctx, 12, 12);
     ctx.beginPath(); ctx.arc(-12, 0, 3, 0, Math.PI * 2); ctx.moveTo(15, 0); ctx.arc(12, 0, 3, 0, Math.PI * 2); ctx.stroke();
@@ -345,7 +346,8 @@ const Render = (function () {
     } else if (T === 'lamp') {
       leads(ctx, 15, 15);
       if (o.run && Math.abs(p.simVoltage) > 2) {
-        const g = ctx.createRadialGradient(0, 0, 4, 0, 0, 30); g.addColorStop(0, 'rgba(255,214,102,.75)'); g.addColorStop(1, 'rgba(255,214,102,0)');
+        const lc = LAMP_RGB[p.color] || LAMP_RGB[''];
+        const g = ctx.createRadialGradient(0, 0, 4, 0, 0, 30); g.addColorStop(0, 'rgba(' + lc + ',.75)'); g.addColorStop(1, 'rgba(' + lc + ',0)');
         ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2); ctx.fill();
       }
       ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI * 2); ctx.moveTo(-9, -9); ctx.lineTo(9, 9); ctx.moveTo(9, -9); ctx.lineTo(-9, 9); ctx.stroke();

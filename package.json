@@ -1,6 +1,6 @@
 {
   "name": "eletrolab-studio",
-  "version": "0.11.2",
+  "version": "0.13.0",
   "description": "Editor visual e simulador didático de comandos elétricos e CLP (Ladder)",
   "main": "main.js",
   "scripts": {
