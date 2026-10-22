@@ -8,6 +8,8 @@
 //   rail_pos / rail_neg : trilhos (barramentos). Todos os pinos de um trilho são a mesma rede.
 //   ground e rail_neg   : referência de 0 V. Todos juntos formam uma única rede.
 //   level_sw    : sensor de nível (boia), contato NA que o engine fecha conforme o nível do tanque.
+//   sensor3     : sensor de 3 fios com LED. pino 0 = marrom (+24V), 1 = azul (0V), 2 = preto (saída).
+//                 Consome ~10 mA entre + e −. Com a saída ativa e o sensor alimentado (≥ 10 V), PNP liga a saída ao +, NPN liga a saída ao 0 V.
 //   pump / valve: bomba e válvula de dreno, cargas resistivas (valor em Ω).
 const Solver = (function () {
   const R_OPEN = 1e9, R_CLOSED = 0.001, G_MIN = 1e-12, PIVOT_MIN = 1e-15;
@@ -18,10 +20,13 @@ const Solver = (function () {
   function pinCount(p) {
     if (p.type === 'ground') return 1;
     if (isRail(p)) return Math.max(2, Math.round(Number(p.len) || 8)) + 1;
+    if (p.type === 'sensor3') return 3;
     return 2;
   }
   function isVSource(p) { return p.type === 'source'; }
+  const SENSOR_R = 2400, SENSOR_OUT_R = 1;   // consumo ≈ 10 mA a 24 V; saída ativa ≈ 1 Ω
   function resistanceOf(p) {
+    if (p.type === 'sensor3') return SENSOR_R;
     if (SWITCHES.includes(p.type)) return p.closed ? R_CLOSED : R_OPEN;
     if (p.type === 'plc_output') return p.outOn ? R_CLOSED : R_OPEN;
     if (p.type === 'plc_input') return Math.max(1, Number(p.value) || 3000);
@@ -102,6 +107,10 @@ const Solver = (function () {
     parts.forEach(p => {
       if (NET_ONLY.includes(p.type) || isVSource(p)) return;
       stampG(find(p.id + ':0'), find(p.id + ':1'), 1 / resistanceOf(p));
+      if (p.type === 'sensor3') {   // chave de saída: PNP entre + e saída, NPN entre saída e −
+        const g = 1 / (p.sOut ? SENSOR_OUT_R : R_OPEN);
+        if (p.npn) stampG(find(p.id + ':2'), find(p.id + ':1'), g); else stampG(find(p.id + ':0'), find(p.id + ':2'), g);
+      }
     });
     vs.forEach((p, k) => {
       const row = nn + k;
@@ -120,6 +129,11 @@ const Solver = (function () {
       if (p.type === 'ground') { results[p.id] = { v: 0, i: 0 }; return; }
       if (isRail(p)) { results[p.id] = { v: volt(find(p.id + ':0')), i: 0 }; return; }
       const va = volt(find(p.id + ':0')), vb = volt(find(p.id + ':1'));
+      if (p.type === 'sensor3') {
+        const vc = volt(find(p.id + ':2')), is = (va - vb) / SENSOR_R, io = p.npn ? (vc - vb) / (p.sOut ? SENSOR_OUT_R : R_OPEN) : (va - vc) / (p.sOut ? SENSOR_OUT_R : R_OPEN);
+        results[p.id] = { v: va - vb, i: is, pinI: p.npn ? [is, -is - io, io] : [is + io, -is, -io] };   // corrente que ENTRA por cada pino
+        return;
+      }
       if (isVSource(p)) results[p.id] = { v: vb - va, i: -x[nn + vs.indexOf(p)] }; // corrente entregue ao circuito
       else results[p.id] = { v: va - vb, i: (va - vb) / resistanceOf(p) };
     });
@@ -144,7 +158,7 @@ const Solver = (function () {
         const part = byId[e.id];
         if (!part || NET_ONLY.includes(part.type)) return;
         const i = results[part.id].i;            // fluxo interno pino 0 → pino 1
-        const into = e.pin === 0 ? i : -i;       // corrente que ENTRA no componente por este pino
+        const into = results[part.id].pinI ? results[part.id].pinI[e.pin] : e.pin === 0 ? i : -i;       // corrente que ENTRA no componente por este pino
         const f = sgn * into;                    // sentido no fio, de a para b
         if (Math.abs(f) > bestMag) { bestMag = Math.abs(f); best = f > 0 ? 1 : -1; }
       });

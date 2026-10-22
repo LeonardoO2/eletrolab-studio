@@ -3,7 +3,8 @@
 const Engine = (function () {
   const S = (typeof module !== 'undefined') ? require('./solver.js') : Solver;
   const P = (typeof module !== 'undefined') ? require('./plc.js') : PLC;
-  const VERSION = '0.13.0', SCHEMA = 2;
+  const VERSION = '0.16.0', SCHEMA = 2;
+  const SENSOR_ON = 10;  // V mínimos entre + e − para o sensor de 3 fios funcionar
   const INPUT_ON = 12;   // V mínimos para nível alto em entrada do CLP
   const COIL_ON = 12;    // V mínimos para energizar bobina de relé
   const LOAD_ON = 12;    // V mínimos para a bomba funcionar e a válvula abrir
@@ -30,12 +31,15 @@ const Engine = (function () {
     estop:      { name: 'Emergência E0', value: 0,   unit: '',  labels: ['11', '12'], nc: true },
     thermal:    { name: 'Térmico F1',   value: 0,    unit: '',  labels: ['95', '96'], nc: true },
     sensor_ind: { name: 'Sensor indutivo B3', value: 0, unit: '', labels: ['3', '4'] },
+    // sensor de 3 fios com LED (sub: ind|cap|foto; npn: saída PNP ou NPN). Clique na simulação aproxima/afasta o objeto.
+    sensor3:    { name: 'B1', value: 0, unit: '', labels: ['BN +', 'BU −', 'BK'] },
     // planta didática (tanque): value do sensor = nível (%) em que o contato fecha
     level_sw:   { name: 'Sensor de nível', value: 50, unit: '%', labels: ['1', '2'] },
     pump:       { name: 'Bomba P1',     value: 48,   unit: 'Ω', labels: ['M1', 'M2'] },
     valve:      { name: 'Válvula Y1',   value: 120,  unit: 'Ω', labels: ['A1', 'A2'] }
   };
-  const LATCH_TYPES = ['estop', 'thermal', 'sensor_ind'];
+  const LATCH_TYPES = ['estop', 'thermal', 'sensor_ind', 'sensor3'];
+  const SENSOR_SUBS = ['ind', 'cap', 'foto'];
   const PLANT_TYPES = ['level_sw', 'pump', 'valve'];
   const LAMP_COLORS = ['red', 'yellow', 'green'];
   // Tipo de planta didática do projeto: 'tank' (sensor, bomba ou válvula), 'traffic' (sinaleiros vermelho e verde) ou null.
@@ -69,18 +73,19 @@ const Engine = (function () {
       return out;
     }
     if (t === 'plc_cpu') return [{ x: 0, y: -CPU_H / 2, dx: 0, dy: -1 }, { x: 0, y: CPU_H / 2, dx: 0, dy: 1 }];
+    if (t === 'sensor3') return [{ x: -38, y: 0, dx: -1, dy: 0 }, { x: 38, y: 0, dx: 1, dy: 0 }, { x: 0, y: -20, dx: 0, dy: -1 }];
     return [{ x: -38, y: 0, dx: -1, dy: 0 }, { x: 38, y: 0, dx: 1, dy: 0 }];
   }
 
   function blank(type) {
     const d = DEFAULTS[type];
     return { id: 0, type, x: 0, y: 0, rotation: 0, name: d.name, value: d.value, tag: '', ref: '', color: '', len: d.len || 0,
-             closed: d.nc === true, energized: false, outOn: false, simVoltage: 0, simCurrent: 0 };
+             closed: d.nc === true, energized: false, outOn: false, simVoltage: 0, simCurrent: 0, sub: 'ind', npn: false, sPow: false, sOut: false };
   }
 
   function createWorld() {
     return { parts: [], wires: [], zones: [], program: [], rt: P.createRuntime(), nextId: 1, nextZoneId: 1,
-             sim: { ok: false, V: 0, I: 0, P: 0 }, plcPowered: true, pinV: {}, plant: defaultPlant(), sheet: defaultSheet() };
+             sim: { ok: false, V: 0, I: 0, P: 0 }, plcPowered: true, pinV: {}, plant: defaultPlant(), sheet: defaultSheet(), virtual: false, vin: {}, simMs: 0 };
   }
   function defaultSheet() { return { title: '', author: '', rev: 'A' }; }
   function sanitizeSheet(s) {
@@ -115,7 +120,7 @@ const Engine = (function () {
   function resetStates(w) {
     w.parts.forEach(p => {
       p.closed = DEFAULTS[p.type].nc === true;
-      p.energized = false; p.outOn = false; p.simVoltage = 0; p.simCurrent = 0;
+      p.energized = false; p.outOn = false; p.simVoltage = 0; p.simCurrent = 0; p.sPow = false; p.sOut = false;
     });
     w.wires.forEach(x => { x.v = null; x.flow = 0; });
     w.rt = P.createRuntime();
@@ -151,6 +156,11 @@ const Engine = (function () {
         else if (p.type === 'pump' || p.type === 'valve') p.energized = Math.abs(p.simVoltage) >= LOAD_ON;
       });
       let changed = false;
+      w.parts.forEach(p => {   // sensor de 3 fios: só atua se estiver alimentado (≥ 10 V entre + e −)
+        if (p.type !== 'sensor3') return;
+        const pow = p.simVoltage >= SENSOR_ON, out = pow && !!p.closed;
+        if (pow !== p.sPow || out !== p.sOut) { p.sPow = pow; p.sOut = out; changed = true; }
+      });
       w.parts.forEach(p => {
         if (p.type !== 'relay_no' && p.type !== 'relay_nc') return;
         const coil = w.parts.find(q => q.type === 'relay_coil' && q.name === p.ref);
@@ -168,12 +178,23 @@ const Engine = (function () {
     return cpus.length === 0 || cpus.every(c => c.simVoltage >= CPU_ON);
   }
 
-  function start(w) { resetStates(w); solveElectric(w); w.plcPowered = cpuPowered(w); }
-  function stop(w) { resetStates(w); }
+  // opts.virtual: bancada de Ladder — as entradas vêm de w.vin (chaves virtuais) e não há circuito elétrico.
+  function start(w, opts) {
+    w.virtual = !!(opts && opts.virtual); w.vin = {}; w.simMs = 0;
+    resetStates(w);
+    if (w.virtual) { w.plcPowered = true; return; }
+    solveElectric(w); w.plcPowered = cpuPowered(w);
+  }
+  function stop(w) { w.virtual = false; w.vin = {}; resetStates(w); }
 
   // Ciclo de varredura: (1) lê entradas físicas, (2) executa o Ladder, (3) escreve saídas físicas.
   // Sem alimentação, o CLP desliga: memória apagada e todas as saídas abertas.
   function step(w, dtMs) {
+    w.simMs = (w.simMs || 0) + dtMs;
+    if (w.virtual) {
+      Object.keys(w.vin).forEach(t => { w.rt.tags[t] = !!w.vin[t]; });
+      return P.scan(w.program, w.rt, dtMs);
+    }
     solveElectric(w);
     w.plcPowered = cpuPowered(w);
     if (!w.plcPowered) {
@@ -184,7 +205,7 @@ const Engine = (function () {
       plantStep(w, dtMs);
       return null;
     }
-    w.parts.forEach(p => { if (p.type === 'plc_input' && p.tag) w.rt.tags[p.tag] = p.simVoltage >= INPUT_ON; });
+    w.parts.forEach(p => { if (p.type === 'plc_input' && p.tag) w.rt.tags[p.tag] = Math.abs(p.simVoltage) >= INPUT_ON; });   // entrada bipolar: serve para sensores PNP (fonte) e NPN (dreno)
     const info = P.scan(w.program, w.rt, dtMs);
     w.parts.forEach(p => { if (p.type === 'plc_output') p.outOn = !!w.rt.tags[p.tag]; });
     solveElectric(w);
@@ -195,7 +216,7 @@ const Engine = (function () {
   function serialize(w) {
     return {
       app: 'EletroLab Studio', version: VERSION, schema: SCHEMA, nextId: w.nextId,
-      parts: w.parts.map(p => ({ id: p.id, type: p.type, x: p.x, y: p.y, rotation: p.rotation, name: p.name, value: p.value, tag: p.tag, ref: p.ref, len: p.len, color: p.color || undefined })),
+      parts: w.parts.map(p => ({ id: p.id, type: p.type, x: p.x, y: p.y, rotation: p.rotation, name: p.name, value: p.value, tag: p.tag, ref: p.ref, len: p.len, color: p.color || undefined, sub: p.type === 'sensor3' ? p.sub : undefined, npn: p.type === 'sensor3' ? !!p.npn : undefined })),
       wires: w.wires.map(x => ({ a: { id: x.a.id, pin: x.a.pin }, b: { id: x.b.id, pin: x.b.pin } })),
       zones: w.zones.map(z => ({ id: z.id, x: z.x, y: z.y, w: z.w, h: z.h, label: z.label })),
       plant: { initial: w.plant.initial, fillRate: w.plant.fillRate, drainRate: w.plant.drainRate },
@@ -216,6 +237,7 @@ const Engine = (function () {
       if (!isFinite(p.value)) p.value = DEFAULTS[o.type].value;
       p.tag = String(o.tag || ''); p.ref = String(o.ref || '');
       if (o.type === 'lamp' && LAMP_COLORS.includes(o.color)) p.color = o.color;
+      if (o.type === 'sensor3') { p.sub = SENSOR_SUBS.includes(o.sub) ? o.sub : 'ind'; p.npn = o.npn === true; }
       if (DEFAULTS[o.type].len) {
         let len = Math.round(Number(o.len) || DEFAULTS[o.type].len);
         len = Math.max(2, Math.min(80, len)); if (len % 2) len += 1;
@@ -468,6 +490,30 @@ const Engine = (function () {
     resetStates(w);
   }
 
+  // Bancada de Ladder: sem circuito, só o programa. Pisca-pisca com liga/desliga (usa a bancada virtual).
+  function loadBenchExample(w) {
+    clear(w);
+    const c = (type, tag) => ({ type, tag });
+    w.program = [
+      { comment: 'Liga/desliga com selo: %I0.0 liga, %I0.1 desliga',
+        cells: [{ contacts: [c('NO', '%I0.0'), c('NO', '%M0.0')] }, { contacts: [c('NC', '%I0.1')] }],
+        out: { type: 'coil', tag: '%M0.0', preset: 0 } },
+      { comment: 'Pisca-pisca (1/2): T1 conta 500 ms e é zerado quando T2 termina',
+        cells: [{ contacts: [c('NO', '%M0.0')] }, { contacts: [c('NC', 'T2.DN')] }],
+        out: { type: 'ton', tag: 'T1', preset: 500 } },
+      { comment: 'Pisca-pisca (2/2): quando T1 termina, T2 conta mais 500 ms',
+        cells: [{ contacts: [c('NO', 'T1.DN')] }],
+        out: { type: 'ton', tag: 'T2', preset: 500 } },
+      { comment: 'Lâmpada A acende enquanto T1.DN está verdadeiro',
+        cells: [{ contacts: [c('NO', 'T1.DN')] }],
+        out: { type: 'coil', tag: '%Q0.0', preset: 0 } },
+      { comment: 'Lâmpada B é a inversa da A (pisca alternado)',
+        cells: [{ contacts: [c('NO', '%M0.0')] }, { contacts: [c('NC', '%Q0.0')] }],
+        out: { type: 'coil', tag: '%Q0.1', preset: 0 } }
+    ];
+    resetStates(w);
+  }
+
   function loadTankExample(w) {
     clear(w);
     const TOP = 80, BOT = 470, LEN = 72, RX = 760;
@@ -545,9 +591,66 @@ const Engine = (function () {
     resetStates(w);
   }
 
-  const EXAMPLES = { partida: loadExample, motor: loadMotorExample, contador: loadCounterExample, tanque: loadTankExample, semaforo: loadTrafficExample };
+  // Bancada com contatos de borda: um botão liga/desliga a saída (alternador) e outro conta cliques.
+  function loadEdgeExample(w) {
+    clear(w);
+    const c = (type, tag) => ({ type, tag }), r = (comment, contacts, out) => ({ comment, cells: contacts.map(k => ({ contacts: [k] })), out });
+    w.program = [
+      r('Pulso de um ciclo: %M0.0 vale 1 só na varredura em que %I0.0 sobe (contato P)', [c('P', '%I0.0')], { type: 'coil', tag: '%M0.0', preset: 0 }),
+      r('Alternador (1/4): pulso com a saída desligada pede para ligar', [c('NO', '%M0.0'), c('NC', '%Q0.0')], { type: 'coil', tag: '%M0.1', preset: 0 }),
+      r('Alternador (2/4): pulso com a saída ligada pede para desligar', [c('NO', '%M0.0'), c('NO', '%Q0.0')], { type: 'coil', tag: '%M0.2', preset: 0 }),
+      r('Alternador (3/4): liga e mantém %Q0.0', [c('NO', '%M0.1')], { type: 'set', tag: '%Q0.0', preset: 0 }),
+      r('Alternador (4/4): desliga %Q0.0', [c('NO', '%M0.2')], { type: 'reset', tag: '%Q0.0', preset: 0 }),
+      r('Cada subida de %I0.0 conta 1 em C1; com 3 cliques C1.DN fica verdadeiro', [c('P', '%I0.0')], { type: 'ctu', tag: 'C1', preset: 3 }),
+      r('%Q0.1 acende quando C1 chega a 3', [c('NO', 'C1.DN')], { type: 'coil', tag: '%Q0.1', preset: 0 }),
+      r('%I0.1 zera o contador', [c('NO', '%I0.1')], { type: 'ctr', tag: 'C1', preset: 3 })
+    ];
+    resetStates(w);
+  }
+  // Sensores de 3 fios: indutivo PNP, capacitivo PNP e fotoelétrico NPN, cada um com seu LED, ligados ao CLP e a uma lâmpada.
+  function loadSensorExample(w) {
+    clear(w);
+    const TOP = 80, BOT = 470, LEN = 66, RX = 700;
+    const top = makePart(w, 'rail_pos', RX, TOP, { rotation: 90, len: LEN, name: '+24V' });
+    const bot = makePart(w, 'rail_neg', RX, BOT, { rotation: 90, len: LEN, name: '0V' });
+    const R = (rail, X) => ({ id: rail.id, pin: rail.len / 2 + (rail.x - X) / 20 });
+    const pin = (p, i) => ({ id: p.id, pin: i });
+    const link = (a, b) => w.wires.push({ a, b });
+    const V = (type, x, y, o) => makePart(w, type, x, y, Object.assign({ rotation: 90 }, o));
 
-  return { DEFAULTS, VERSION, CPU_W, CPU_H, PLANT_TYPES, LAMP_COLORS, plantKind, LATCH_TYPES, sanitizeSheet, EXAMPLES, loadMotorExample, loadCounterExample, loadTrafficExample, pinLocal, createWorld, makePart, makeZone, clear, start, stop, step,
+    const src = V('source', 80, 280, { rotation: 270, name: 'Fonte' });
+    link(pin(src, 1), R(top, 80)); link(pin(src, 0), R(bot, 80));
+    // sensor: + em cima (marrom), − embaixo (azul), saída (preto) na lateral → entrada do CLP, 40 px à direita
+    [['B1', 'ind', false, 220, 'Entrada I0.0', '%I0.0'], ['B2', 'cap', false, 360, 'Entrada I0.1', '%I0.1'], ['B3', 'foto', true, 500, 'Entrada I0.2', '%I0.2']].forEach(([name, sub, npn, X, iname, tag]) => {
+      const b = V('sensor3', X, 190, { name, sub, npn }), inp = V('plc_input', X + 40, 340, { name: iname, tag });
+      link(R(top, X), pin(b, 0)); link(pin(b, 1), R(bot, X)); link(pin(b, 2), pin(inp, 0));
+      link(pin(inp, 1), npn ? R(top, X + 40) : R(bot, X + 40));     // NPN (dreno): comum da entrada no +24V
+    });
+    const cpu = makePart(w, 'plc_cpu', 800, 240, { name: 'CLP' });
+    link(R(top, 800), pin(cpu, 0)); link(pin(cpu, 1), R(bot, 800));
+    [['Saída Q0.0', '%Q0.0', 1000, 'H1 Metal', 'green'], ['Saída Q0.1', '%Q0.1', 1120, 'H2 Cheio', 'yellow'], ['Saída Q0.2', '%Q0.2', 1240, 'H3 Objeto', 'red']].forEach(([n, tag, X, ln, color]) => {
+      const out = V('plc_output', X, 170, { name: n, tag }), lamp = V('lamp', X, 300, { name: ln, color });
+      link(R(top, X), pin(out, 0)); link(pin(out, 1), pin(lamp, 0)); link(pin(lamp, 1), R(bot, X));
+    });
+    makeZone(w, 44, 48, 96, 450, 'Fonte');
+    makeZone(w, 180, 48, 140, 450, 'B1 Indut.');
+    makeZone(w, 324, 48, 140, 450, 'B2 Capac.');
+    makeZone(w, 468, 48, 140, 450, 'B3 Foto');
+    makeZone(w, 676, 48, 254, 450, 'CLP');
+    makeZone(w, 964, 48, 120, 450, 'Verde');
+    makeZone(w, 1088, 48, 120, 450, 'Amarelo');
+    makeZone(w, 1212, 48, 120, 450, 'Vermelho');
+    const c = (type, tag) => ({ type, tag });
+    w.program = [
+      { comment: 'B1 (indutivo PNP) detectou metal → lâmpada verde', cells: [{ contacts: [c('NO', '%I0.0')] }], out: { type: 'coil', tag: '%Q0.0', preset: 0 } },
+      { comment: 'B2 (capacitivo PNP) detectou o material → lâmpada amarela', cells: [{ contacts: [c('NO', '%I0.1')] }], out: { type: 'coil', tag: '%Q0.1', preset: 0 } },
+      { comment: 'B3 (fotoelétrico NPN) detectou o objeto → lâmpada vermelha', cells: [{ contacts: [c('NO', '%I0.2')] }], out: { type: 'coil', tag: '%Q0.2', preset: 0 } }
+    ];
+    resetStates(w);
+  }
+  const EXAMPLES = { sensores: loadSensorExample, bancada2: loadEdgeExample, partida: loadExample, motor: loadMotorExample, contador: loadCounterExample, tanque: loadTankExample, semaforo: loadTrafficExample, bancada: loadBenchExample };
+
+  return { DEFAULTS, VERSION, CPU_W, CPU_H, PLANT_TYPES, LAMP_COLORS, plantKind, LATCH_TYPES, SENSOR_SUBS, sanitizeSheet, EXAMPLES, loadMotorExample, loadCounterExample, loadTrafficExample, loadBenchExample, loadEdgeExample, loadSensorExample, pinLocal, createWorld, makePart, makeZone, clear, start, stop, step,
            solveElectric, cpuPowered, serialize, loadProject, loadExample, loadTankExample, hasPlantParts, sanitizePlant, updateSensors };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;

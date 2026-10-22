@@ -1,7 +1,7 @@
 // Motor Ladder booleano (IEC 61131-3, simplificado).
 // Um degrau = contatos em série (cada "célula" pode ter contatos em paralelo = OU) + uma saída.
 //   rung = { comment, cells: [ { contacts: [ { type:'NO'|'NC', tag } ] } ], out: { type, tag, preset } }
-//   contato: { type:'NO'|'NC', tag } ou comparação { type:'CMP', tag, op:'>'|'<'|'>='|'<='|'=='|'!=', value:número|tag } (compara valores numéricos, ex.: C1.ACC >= 3)
+//   contato: { type:'NO'|'NC'|'P'|'N', tag } (P = borda de subida, N = borda de descida) ou comparação { type:'CMP', tag, op:'>'|'<'|'>='|'<='|'=='|'!=', value:número|tag } (compara valores numéricos, ex.: C1.ACC >= 3)
 //   out.type: 'coil' (OTE), 'set', 'reset', 'ton', 'tof' (preset em ms), 'ctu' (contador crescente), 'ctd' (contador regressivo: parte do preset e desce até 0), 'ctr' (volta o contador cujo nome está em tag ao valor inicial)
 // Temporizadores e contadores expõem as tags NOME.DN (feito) e NOME.ACC (acumulado: ms ou contagem).
 // O contador CTU conta uma vez a cada subida do degrau (borda de subida).
@@ -13,7 +13,7 @@ const PLC = (function () {
   const RE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
   const RE_MEMBER = /^[A-Za-z_][A-Za-z0-9_]*\.(DN|ACC)$/;
 
-  function createRuntime() { return { tags: {}, timers: {}, counters: {} }; }
+  function createRuntime() { return { tags: {}, timers: {}, counters: {}, edges: {} }; }
 
   // Mensagem de erro (string) ou '' se a tag for válida para LEITURA em contato.
   function tagError(tag) {
@@ -47,6 +47,42 @@ const PLC = (function () {
     }
   }
 
+  // Mapa de entrada e saída do programa (para a bancada virtual e o diagrama de tempo).
+  //   inputs : tags lidas em contatos que nenhum degrau escreve (%I0.0, nomes livres…) — viram chaves/botões
+  //   outputs: tags %Q escritas por bobina/set/reset — viram lâmpadas
+  //   memory : demais tags booleanas escritas (%M0.0, nomes livres)
+  //   timers/counters: [{ name, type, preset }]
+  //   signals: lista (entradas, saídas, memórias e NOME.DN) para o diagrama de tempo
+  function natKey(t) {
+    const m = /^%([IQM])(\d+)\.(\d+)$/.exec(t);
+    return m ? [({ I: 0, Q: 1, M: 2 })[m[1]], Number(m[2]), Number(m[3]), ''] : [3, 0, 0, t];
+  }
+  function natSort(a, b) {
+    const x = natKey(a), y = natKey(b);
+    for (let i = 0; i < 4; i++) { if (x[i] < y[i]) return -1; if (x[i] > y[i]) return 1; }
+    return 0;
+  }
+  function ioMap(program) {
+    const written = new Set(), timers = [], counters = [], reads = new Set();
+    (program || []).forEach(r => {
+      const o = r && r.out; if (!o || !o.tag) return;
+      if (o.type === 'coil' || o.type === 'set' || o.type === 'reset') written.add(o.tag);
+      else if (o.type === 'ton' || o.type === 'tof') { if (!timers.some(t => t.name === o.tag)) timers.push({ name: o.tag, type: o.type, preset: Number(o.preset) || 0 }); }
+      else if (o.type === 'ctu' || o.type === 'ctd') { if (!counters.some(t => t.name === o.tag)) counters.push({ name: o.tag, type: o.type, preset: Number(o.preset) || 0 }); }
+    });
+    (program || []).forEach(r => (r.cells || []).forEach(c => (c.contacts || []).forEach(k => {
+      if (k.type === 'CMP' || !k.tag) return;
+      if (RE_MEMBER.test(k.tag)) return;
+      if (timers.some(t => t.name === k.tag) || counters.some(t => t.name === k.tag)) return;
+      reads.add(k.tag);
+    })));
+    const inputs = [...reads].filter(t => !written.has(t)).sort(natSort);
+    const outputs = [...written].filter(t => /^%Q/.test(t)).sort(natSort);
+    const memory = [...written].filter(t => !/^%Q/.test(t)).sort(natSort);
+    const signals = [...inputs, ...outputs, ...memory, ...timers.map(t => t.name + '.DN'), ...counters.map(t => t.name + '.DN')];
+    return { inputs, outputs, memory, timers, counters, signals };
+  }
+
   function newRung() {
     return { comment: '', cells: [{ contacts: [{ type: 'NO', tag: '%I0.0' }] }], out: { type: 'coil', tag: '%Q0.0', preset: 1000 } };
   }
@@ -59,7 +95,7 @@ const PLC = (function () {
         contacts: ((c && Array.isArray(c.contacts)) ? c.contacts : []).map(k => {
           const tag = String((k && k.tag) || '').trim();
           if (k && k.type === 'CMP') return { type: 'CMP', tag, op: CMP_OPS.includes(k.op) ? k.op : '==', value: cmpValue(k.value) };
-          return { type: k && k.type === 'NC' ? 'NC' : 'NO', tag };
+          return { type: k && (k.type === 'NC' || k.type === 'P' || k.type === 'N') ? k.type : 'NO', tag };
         })
       })),
       out: {
@@ -83,6 +119,14 @@ const PLC = (function () {
     }
     rt.tags[name + '.DN'] = t.dn;
     rt.tags[name + '.ACC'] = Math.round(t.acc);
+  }
+
+  // Contato de borda: P = vale 1 só na varredura em que a tag sobe; N = só quando desce.
+  // Na primeira varredura não há borda (o estado anterior é igual ao atual).
+  function edge(c, rt, key) {
+    const now = !!rt.tags[c.tag], had = key in rt.edges, prev = had ? rt.edges[key] : now;
+    rt.edges[key] = now;
+    return c.type === 'P' ? now && !prev : !now && prev;
   }
 
   function counterOf(rt, name) {
@@ -122,13 +166,14 @@ const PLC = (function () {
   // Uma varredura completa, degrau por degrau, de cima para baixo.
   // Retorna, por degrau, o fluxo de energia (para destacar na interface).
   function scan(program, rt, dtMs) {
-    return program.map(rung => {
+    if (!rt.edges) rt.edges = {};
+    return program.map((rung, ri) => {
       let power = true;
-      const cells = rung.cells.map(cell => {
+      const cells = rung.cells.map((cell, ci) => {
         const powerIn = power;
         let pass = cell.contacts.length === 0;
-        const contacts = cell.contacts.map(c => {
-          const ok = c.type === 'CMP' ? compare(c, rt) : (c.type === 'NC' ? !rt.tags[c.tag] : !!rt.tags[c.tag]);
+        const contacts = cell.contacts.map((c, ki) => {
+          const ok = c.type === 'CMP' ? compare(c, rt) : c.type === 'P' || c.type === 'N' ? edge(c, rt, ri + '.' + ci + '.' + ki) : (c.type === 'NC' ? !rt.tags[c.tag] : !!rt.tags[c.tag]);
           if (ok) pass = true;
           return powerIn && ok;
         });
@@ -140,6 +185,6 @@ const PLC = (function () {
     });
   }
 
-  return { createRuntime, scan, newRung, sanitizeProgram, tagError, outTagError, OUT_TYPES, CMP_OPS, cmpValue };
+  return { createRuntime, scan, newRung, sanitizeProgram, tagError, outTagError, OUT_TYPES, CMP_OPS, cmpValue, ioMap };
 })();
 if (typeof module !== 'undefined') module.exports = PLC;

@@ -2,7 +2,7 @@
 const SheetExport = (function () {
   const TYPE_LABEL = {
     source: 'Fonte CC', push_no: 'Botão NA', push_nc: 'Botão NF', estop: 'Botão de emergência NF', thermal: 'Relé térmico (contato NF)',
-    sensor_ind: 'Sensor indutivo', level_sw: 'Sensor de nível', relay_coil: 'Bobina de relé', relay_no: 'Contato NA de relé', relay_nc: 'Contato NF de relé',
+    sensor_ind: 'Sensor indutivo (2 fios)', sensor3: 'Sensor de 3 fios (PNP/NPN)', level_sw: 'Sensor de nível', relay_coil: 'Bobina de relé', relay_no: 'Contato NA de relé', relay_nc: 'Contato NF de relé',
     lamp: 'Sinaleiro', motor_load: 'Motor CC', pump: 'Bomba', valve: 'Válvula solenoide', plc_cpu: 'CLP (CPU)', plc_input: 'Módulo de entrada', plc_output: 'Módulo de saída'
   };
   const SKIP = ['ground', 'rail_pos', 'rail_neg'];

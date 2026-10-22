@@ -42,6 +42,32 @@ canvas.wire{cursor:crosshair}canvas.pan{cursor:grabbing}
 #plantMini{position:relative;width:100%;height:190px;border-radius:8px;border:1px solid var(--line);cursor:pointer;display:block;margin-bottom:8px}
 .pf{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:var(--muted);margin:6px 0}
 .pf input{width:78px;padding:4px 6px}
+#benchIO,#benchTime{position:absolute;display:none;background:#111923}
+#benchIO{top:0;right:0;width:340px;bottom:var(--bt,240px);overflow:auto;padding:12px 14px;border-left:1px solid var(--line);border-bottom:1px solid var(--line)}
+#benchTime{left:0;right:0;bottom:0;height:var(--bt,240px)}
+.bt-head{height:30px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;background:#141c25;border-bottom:1px solid var(--line)}
+.bt-title{font-weight:700;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.bt-btns{display:flex;gap:4px}.bt-btns button{padding:2px 8px;font-size:12px}.bt-win.active{background:var(--accent);color:#06241f;border-color:var(--accent)}
+#benchCanvas{top:30px;bottom:auto;height:calc(100% - 30px)}
+.views.bench #canvas,.views.bench #splitter{display:none}
+.views.bench #ladderView{display:block;right:340px;bottom:var(--bt,240px);border-bottom:1px solid var(--line)}
+.views.bench .ladder-intro{display:none}
+.views.bench #benchIO,.views.bench #benchTime{display:block}
+.bn-sec{margin-bottom:16px}.bn-title{font-weight:700;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
+.bn-hint{font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:6px}.bn-empty{font-size:12px;color:var(--muted);line-height:1.6}
+.bn-row{display:flex;align-items:center;gap:8px;margin:5px 0}
+.bn-tag{font-family:Consolas,monospace;font-size:12px;min-width:84px;color:var(--text)}
+.bn-switch{position:relative;width:40px;height:22px;padding:0;border-radius:11px;background:#2a3949;border:1px solid var(--line);cursor:pointer;flex:none}
+.bn-switch i{position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:50%;background:#8397ab;transition:left .12s,background .12s}
+.bn-row.on .bn-switch{background:rgba(67,198,172,.25);border-color:var(--accent)}.bn-row.on .bn-switch i{left:20px;background:var(--accent)}
+.bn-pulse{padding:2px 8px;font-size:11px}.bn-row.on .bn-tag{color:var(--accent)}
+.bn-lamp{width:16px;height:16px;border-radius:50%;border:2px solid #51657b;flex:none;background:#111923}
+.bn-lamp.on{background:#ffd666;border-color:#ffe9a8;box-shadow:0 0 10px rgba(255,214,102,.7)}
+.bn-lamp.mem{width:12px;height:12px;border-radius:3px}.bn-lamp.mem.on{background:var(--accent);border-color:var(--accent);box-shadow:none}
+.bn-bar .bn-tag{min-width:72px}.bn-track{flex:1;height:8px;border-radius:4px;background:#243242;overflow:hidden}
+.bn-fill{display:block;height:100%;width:0;background:var(--plc);transition:width .05s linear}.bn-bar.done .bn-fill{background:var(--accent)}
+.bn-val{font-family:Consolas,monospace;font-size:11px;color:var(--muted);min-width:88px;text-align:right}
+body.no-run .bn-switch,body.no-run .bn-pulse{opacity:.5}
 .views.ladder canvas{display:none}
 .views.ladder #ladderView{display:block}
 .views.split canvas{height:var(--split);bottom:auto}
@@ -89,6 +115,9 @@ aside.right .section{margin-bottom:20px}aside.right .section:last-child{margin-b
 .symbtn i{display:block;width:3px;height:26px;border-radius:1px;background:var(--plc)}
 .symbtn:hover i,.symbtn:hover.nc::after{background:#c3d0ff}
 .symbtn.nc::after{content:'';position:absolute;left:50%;top:50%;width:3px;height:36px;border-radius:1px;background:var(--plc);transform:translate(-50%,-50%) rotate(35deg)}
+.symbtn.ep::after,.symbtn.en::after{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font:700 12px Consolas,monospace;color:var(--plc);pointer-events:none}
+.symbtn.ep::after{content:'P'}.symbtn.en::after{content:'N'}
+.contact.lit .symbtn.ep::after,.contact.lit .symbtn.en::after{color:var(--accent)}.contact.hl .symbtn.ep::after,.contact.hl .symbtn.en::after{color:var(--warn)}
 .contact.lit .symbtn i,.contact.lit .symbtn.nc::after{background:var(--accent)}
 .segadd{display:flex;align-items:center;flex:1 1 52px;min-width:52px}
 .addnode{flex:none;width:22px;height:22px;padding:0;border-radius:50%;line-height:1;font-size:14px;color:var(--plc)}
@@ -113,7 +142,7 @@ aside.right .section{margin-bottom:20px}aside.right .section:last-child{margin-b
 <header>
   <div><div class="brand">Eletro<span>Lab</span> Studio</div><div class="sub">Automação & CLP (Ladder) <span id="appVer"></span></div></div>
   <div class="toolbar">
-    <button id="newBtn">Novo</button><select id="exampleSel" title="Carregar um exemplo pronto"><option value="">Exemplos…</option><option value="partida">Partida com CLP</option><option value="motor">Motor com proteção (E0, F1)</option><option value="contador">Contagem de peças (CTU)</option><option value="semaforo">Semáforo (planta didática)</option><option value="tanque">Tanque (planta didática)</option></select>
+    <button id="newBtn">Novo</button><select id="exampleSel" title="Carregar um exemplo pronto"><option value="">Exemplos…</option><option value="partida">Partida com CLP</option><option value="motor">Motor com proteção (E0, F1)</option><option value="contador">Contagem de peças (CTU)</option><option value="semaforo">Semáforo (planta didática)</option><option value="tanque">Tanque (planta didática)</option><option value="sensores">Sensores de 3 fios (PNP/NPN com LED)</option><option value="bancada">Bancada: pisca-pisca (só Ladder)</option><option value="bancada2">Bancada: alternador e contador (bordas)</option></select>
     <button id="simBtn" class="primary">▶ Simular</button><button id="stopBtn">■ Parar</button>
     <select id="exportSel" title="Exportar a folha de desenho"><option value="">Folha…</option><option value="png">Folha em PNG</option><option value="pdf">Folha em PDF</option></select><button id="saveBtn">Exportar JSON</button><button id="loadBtn">Abrir JSON</button><input id="fileInput" type="file" accept=".json,application/json" hidden>
   </div>
@@ -151,7 +180,10 @@ aside.right .section{margin-bottom:20px}aside.right .section:last-child{margin-b
   <div class="palette">
     <div class="part" data-type="estop"><div class="sym">⏻</div><span>Emergência (NF)</span></div>
     <div class="part" data-type="thermal"><div class="sym">F ┤/├</div><span>Relé térmico</span></div>
-    <div class="part" data-type="sensor_ind"><div class="sym">◇</div><span>Sensor indutivo</span></div>
+    <div class="part" data-type="sensor_ind"><div class="sym">◇</div><span>Sensor indutivo (2 fios)</span></div>
+    <div class="part" data-type="sensor3" data-sub="ind"><div class="sym">◇•</div><span>Sensor indutivo 3 fios</span></div>
+    <div class="part" data-type="sensor3" data-sub="cap"><div class="sym">═•</div><span>Sensor capacitivo 3 fios</span></div>
+    <div class="part" data-type="sensor3" data-sub="foto"><div class="sym">◎•</div><span>Fotoelétrico 3 fios</span></div>
   </div>
   <h3>Planta (tanque)</h3>
   <div class="palette">
@@ -175,6 +207,7 @@ aside.right .section{margin-bottom:20px}aside.right .section:last-child{margin-b
     <button id="tabSplit" class="tab active" title="Diagrama e Ladder juntos">Dividido</button>
     <button id="tabLadder" class="tab" title="Só o editor de degraus">Ladder</button>
     <button id="tabPlant" class="tab" title="Planta animada e painel do operador">Planta</button>
+    <button id="tabBench" class="tab" title="Bancada de Ladder: entradas e saídas virtuais e diagrama de tempo, sem circuito">Bancada</button>
     <span class="sep"></span>
     <span id="circuitTools" style="display:contents">
       <button id="gridBtn" class="active">Grade</button>
@@ -193,6 +226,12 @@ aside.right .section{margin-bottom:20px}aside.right .section:last-child{margin-b
     <div id="splitter" title="Arraste para ajustar o tamanho"></div>
     <div id="ladderView"></div>
     <div id="plantView"><canvas id="plantCanvas"></canvas></div>
+    <div id="benchIO"></div>
+    <div id="benchTime">
+      <div class="bt-head"><span class="bt-title">Diagrama de tempo</span>
+        <span class="bt-btns"><button class="bt-win" data-ms="10000">10 s</button><button class="bt-win active" data-ms="20000">20 s</button><button class="bt-win" data-ms="60000">60 s</button><button id="btClear" title="Apaga o histórico do diagrama">Limpar</button></span></div>
+      <canvas id="benchCanvas"></canvas>
+    </div>
   </div>
   <div id="tooltip"></div>
   <div class="status" id="status">Pronto. Clique em ▶ Simular e mantenha o mouse pressionado sobre o botão S1.</div>
@@ -229,6 +268,7 @@ aside.right .section{margin-bottom:20px}aside.right .section:last-child{margin-b
 <script src="js/geometry.js"></script>
 <script src="js/render.js"></script>
 <script src="js/ladder-ui.js"></script>
+<script src="js/bench.js"></script>
 <script src="js/plantview.js"></script>
 <script src="js/export.js"></script>
 <script src="js/app.js"></script>

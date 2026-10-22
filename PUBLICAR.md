@@ -2,6 +2,20 @@
 
 Repositório: https://github.com/LeonardoO2/eletrolab-studio (público)
 
+## Forma recomendada: script `publicar.ps1` (uma única release)
+O `npm run release` pode criar rascunhos duplicados (o electron-builder envia os arquivos em paralelo). O script abaixo evita isso: gera o instalador e deixa o GitHub CLI criar **uma** release com os três arquivos (`.exe`, `.blockmap`, `latest.yml`). Não precisa de `GH_TOKEN`.
+
+Uma vez:
+```
+winget install GitHub.cli
+gh auth login
+```
+(feche e abra o PowerShell depois de instalar). A cada versão: suba o `"version"` no `package.json` e rode
+```
+.\publicar.ps1
+```
+O script roda os testes, gera o instalador, confere os arquivos e publica a release já pública. Se a release dessa versão já existir, ele para em vez de duplicar.
+
 ## 1) Primeiro envio do código (uma vez)
 No PowerShell, dentro da pasta do projeto:
 
@@ -19,7 +33,7 @@ git push -u origin main
 GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token.
 Marque o escopo **repo** e copie o token. **Nunca coloque o token em arquivo do projeto nem envie ao GitHub.**
 
-## 3) Publicar uma versão (toda atualização)
+## 3) Alternativa: publicar com `npm run release` (pode duplicar rascunhos)
 1. Rode `npm test` (tudo deve passar).
 2. Aumente `"version"` no `package.json` (ex.: 0.11.0 → 0.12.0). Sem isso o programa instalado não enxerga a novidade. A janela do programa lê a versão daí; opcionalmente atualize também `VERSION` em `js/engine.js`, que só é gravada nos arquivos de projeto salvos.
 3. No PowerShell:

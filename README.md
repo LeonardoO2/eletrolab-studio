@@ -1,8 +1,26 @@
-# EletroLab Studio — protótipo 0.13.0
+# EletroLab Studio — protótipo 0.16.0
 
 **Licença:** MIT. Consulte o arquivo `LICENSE` para os termos completos.
 
 Aplicação desktop para Windows baseada em Electron, feita para **estudar comandos elétricos e programação de CLP (Ladder)**. Funciona localmente, sem internet depois de instalada.
+
+## Sensores de 3 fios com LED (novidade da 0.16.0)
+Em "Proteção e sensores": sensores **indutivo, capacitivo e fotoelétrico de 3 fios** (marrom BN = +24V, azul BU = 0V, preto BK = saída). Cada um tem **LED próprio**, que acende quando o sensor detecta e está alimentado.
+- **Alimentação de verdade:** o sensor consome ~10 mA entre + e − e só atua com pelo menos 10 V entre eles. Sem ligar BN e BU, nada acontece (e o LED fica apagado).
+- **PNP ou NPN** (painel de propriedades): PNP entrega +24V na saída; NPN puxa a saída para 0V. Para NPN, ligue o comum (0V) da entrada do CLP ao **+24V** (entrada tipo dreno). As entradas do CLP agora aceitam as duas polaridades, como entradas sink/source reais.
+- Na simulação, **clique no sensor** para aproximar/afastar o objeto (trava, como a emergência).
+- Exemplo: "Sensores de 3 fios (PNP/NPN com LED)": fonte 24V, três sensores, CLP e lâmpadas.
+- O sensor indutivo de 2 fios continua disponível.
+
+## Contatos de borda (novidade da 0.15.0)
+No editor Ladder, clique no símbolo do contato para alternar **NA → NF → P → N**. **P** (borda de subida) vale 1 só na varredura em que a tag passa de 0 para 1; **N** (borda de descida), só quando passa de 1 para 0. Servem para contar um clique por aperto de botão e para alternadores. Na primeira varredura após o RUN não há borda. Exemplo: "Bancada: alternador e contador (bordas)".
+
+## Bancada de Ladder (novidade da 0.14.0)
+Aba **Bancada**: editor Ladder + painel de **entradas e saídas virtuais**, sem precisar montar circuito. Carregue "Bancada: pisca-pisca" em Exemplos ou crie seus degraus.
+- **Entradas**: toda tag lida por um contato e nunca escrita pelo programa ganha uma chave (liga/desliga) e um botão **Pulso** (vale enquanto o mouse está pressionado).
+- **Saídas e memórias**: lâmpadas para `%Q` e memórias; barras para temporizadores (ACC/preset) e contadores.
+- **Diagrama de tempo**: forma de onda de todos os sinais (entradas, saídas, memórias, `.DN`), janelas de 10/20/60 s e botão Limpar.
+- O painel se atualiza sozinho ao editar o programa. Ao trocar entre Bancada e as outras abas, a simulação é parada (a Bancada usa entradas virtuais, não o circuito).
 
 ## Exemplo "Semáforo" (novidade da 0.13.0)
 No menu **Exemplos…** escolha **Semáforo (planta didática)**. S1 liga o ciclo (com selo) e S0 (NF) desliga e apaga tudo. Três sinaleiros coloridos (verde, amarelo, vermelho) ligados às saídas `%Q0.0` a `%Q0.2`.

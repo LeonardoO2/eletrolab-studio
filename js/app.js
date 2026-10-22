@@ -73,14 +73,18 @@ function drawPlants() {
     const f = fitCanvas(plantMini); if (f) PlantView.draw(plantMini.getContext('2d'), f.w, f.h, f.d, st, true);
   }
 }
-function draw() { if (currentView !== 'plant' && cw && ch) Render.draw(ctx, cw, ch, dpr, st); drawPlants(); }
+function draw() {
+  if (currentView === 'bench') { Bench.paint(); return; }
+  if (currentView !== 'plant' && cw && ch) Render.draw(ctx, cw, ch, dpr, st);
+  drawPlants();
+}
 function requestDraw() {
   if (st.running || rafPending) return;
   rafPending = true; requestAnimationFrame(() => { rafPending = false; draw(); });
 }
 function resize() {
   const r = canvas.getBoundingClientRect();
-  if (!r.width || !r.height) return;
+  if (!r.width || !r.height) { if (currentView === 'bench') draw(); return; }
   dpr = window.devicePixelRatio || 1; cw = r.width; ch = r.height;
   canvas.width = Math.round(cw * dpr); canvas.height = Math.round(ch * dpr);
   if (!didFit || needFit) { didFit = true; needFit = false; fitView(); }
@@ -99,6 +103,7 @@ function nextRelayName() {
   let n = 1; while (world.parts.some(p => p.type === 'relay_coil' && p.name === 'K' + n)) n++;
   return 'K' + n;
 }
+const SENSOR_SUB_NAMES = { ind: 'Indutivo', cap: 'Capacitivo', foto: 'Fotoelétrico' };
 const PLANT_NAMES = { level_sw: 'Sensor B', pump: 'Bomba P', valve: 'Válvula Y', estop: 'Emergência E', thermal: 'Térmico F', sensor_ind: 'Sensor indutivo B' };
 function addPart(type, x, y) {
   if (type === 'zone') {
@@ -111,6 +116,7 @@ function addPart(type, x, y) {
   if (type === 'plc_input') { o.tag = nextTag('%I0.', type); o.name = 'Entrada ' + o.tag.replace('%', ''); }
   else if (type === 'plc_output') { o.tag = nextTag('%Q0.', type); o.name = 'Saída ' + o.tag.replace('%', ''); }
   else if (type === 'relay_coil') o.name = nextRelayName();
+  else if (type === 'sensor3') { o.sub = st.placingSub || 'ind'; let n = 1; while (world.parts.some(q => q.name === 'B' + n)) n++; o.name = 'B' + n; }
   else if (PLANT_NAMES[type]) { let n = 1; while (world.parts.some(q => q.name === PLANT_NAMES[type] + n)) n++; o.name = PLANT_NAMES[type] + n; }
   else if (type === 'relay_no' || type === 'relay_nc') {
     const coil = world.parts.find(p => p.type === 'relay_coil');
@@ -121,7 +127,7 @@ function addPart(type, x, y) {
   renderProperties(); requestDraw(); setStatus(p.name + ' adicionado.');
 }
 function syncPalette() {
-  document.querySelectorAll('.part').forEach(el => el.classList.toggle('on', el.dataset.type === st.placing));
+  document.querySelectorAll('.part').forEach(el => el.classList.toggle('on', el.dataset.type === st.placing && (el.dataset.sub || '') === (st.placing === 'sensor3' ? (st.placingSub || 'ind') : '')));
 }
 
 // ---------- propriedades ----------
@@ -140,6 +146,7 @@ const HINTS = {
   valve: 'Válvula solenoide de 24 V (≥ 12 V abre). Esvazia o tanque com a vazão definida no cartão Planta.',
   estop: 'Botão cogumelo NF com trava: na simulação, clique para acionar (abre o circuito) e clique de novo para rearmar.',
   thermal: 'Contato NF 95-96 do relé térmico. Clique na simulação para simular uma sobrecarga (abre) e clique de novo para rearmar.',
+  sensor3: 'Sensor de 3 fios com LED: marrom (BN) no +24V, azul (BU) no 0V, preto (BK) é a saída, ligada a uma entrada do CLP. PNP entrega +24V na saída; NPN puxa a saída para 0V (ligue o comum da entrada ao +24V). Só atua se estiver alimentado. Clique na simulação para aproximar/afastar o objeto.',
   sensor_ind: 'Sensor indutivo simplificado, contato NA. Clique na simulação para aproximar/afastar o metal.',
   rail_pos: 'Todos os pontos do trilho são a mesma rede. Ligue a fonte e os componentes a qualquer ponto.',
   rail_neg: 'Referência de 0 V. É a mesma rede de qualquer símbolo de Terra.'
@@ -205,6 +212,18 @@ function renderProperties() {
       if (world.wires.length < keep) setStatus('Fios ligados aos pontos removidos do trilho foram excluídos.');
       return '';
     }, 'number');
+  }
+  if (p.type === 'sensor3') {
+    const mk = (label, opts, cur, set) => {
+      const lab = document.createElement('label'); lab.className = 'field'; lab.textContent = label;
+      const sel = document.createElement('select');
+      opts.forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o); });
+      sel.value = cur; sel.onchange = () => { set(sel.value); requestDraw(); };
+      lab.appendChild(sel); el.appendChild(lab);
+    };
+    mk('Princípio de detecção', [['ind', 'Indutivo (metal)'], ['cap', 'Capacitivo (qualquer material)'], ['foto', 'Fotoelétrico (luz)']], p.sub, v => { p.sub = v; });
+    mk('Saída', [['pnp', 'PNP (entrega +24V)'], ['npn', 'NPN (puxa para 0V)']], p.npn ? 'npn' : 'pnp', v => { p.npn = v === 'npn'; });
+    const n = document.createElement('div'); n.className = 'note'; n.textContent = 'Fios: marrom (BN) = +24V, azul (BU) = 0V, preto (BK) = saída. O LED acende quando o sensor detecta e está alimentado (≥ 10 V).'; el.appendChild(n);
   }
   if (hasValue(p)) {
     const unit = DEFAULTS[p.type].unit;
@@ -444,9 +463,9 @@ window.addEventListener('keydown', e => {
 
 document.querySelectorAll('.part').forEach(el => el.addEventListener('click', () => {
   ensureCircuit();
-  st.placing = el.dataset.type; st.placingRot = defaultRotation(st.placing); st.mode = 'select'; st.pendingPin = null;
+  st.placingSub = el.dataset.sub || ''; st.placing = el.dataset.type; st.placingRot = defaultRotation(st.placing); st.mode = 'select'; st.pendingPin = null;
   syncPalette(); setModeHint();
-  const nm = st.placing === 'zone' ? 'Seção' : DEFAULTS[st.placing].name;
+  const nm = st.placing === 'zone' ? 'Seção' : st.placing === 'sensor3' ? 'Sensor ' + SENSOR_SUB_NAMES[st.placingSub || 'ind'].toLowerCase() + ' de 3 fios' : DEFAULTS[st.placing].name;
   setStatus('Clique no diagrama para inserir: ' + nm + ' (R gira, Esc cancela).');
   requestDraw();
 }));
@@ -478,10 +497,12 @@ $('deleteBtn').onclick = deleteSelected;
 // ---------- abas e vista ----------
 // circuit = só o diagrama; split = diagrama em cima e Ladder embaixo; ladder = só o editor de degraus.
 function showView(v) {
+  if (st.running && !!world.virtual !== (v === 'bench')) { stopSim(); setStatus(v === 'bench' ? 'Simulação parada: a Bancada usa entradas virtuais. Clique em ▶ Simular.' : 'Simulação parada. Clique em ▶ Simular.'); }
   currentView = v;
   const circ = v === 'circuit' || v === 'split';
   views.className = 'views ' + v;
   $('tabPlant').classList.toggle('active', v === 'plant');
+  $('tabBench').classList.toggle('active', v === 'bench');
   $('tabCircuit').classList.toggle('active', v === 'circuit');
   $('tabSplit').classList.toggle('active', v === 'split');
   $('tabLadder').classList.toggle('active', v === 'ladder');
@@ -489,14 +510,21 @@ function showView(v) {
   $('modeHint').style.display = circ ? '' : 'none';
   tooltip.style.display = 'none';
   if (st.hoverTag) setHoverTag(null, st.hoverSource);
-  if (v === 'ladder' || v === 'split') LadderUI.render();
+  if (v === 'ladder' || v === 'split' || v === 'bench') LadderUI.render();
   if (circ) { needFit = true; resize(); } else requestDraw();
+  if (v === 'bench') setTimeout(requestDraw, 0);
 }
-function ensureCircuit() { if (currentView === 'ladder' || currentView === 'plant') showView('split'); }
+function ensureCircuit() { if (currentView === 'ladder' || currentView === 'plant' || currentView === 'bench') showView('split'); }
 $('tabCircuit').onclick = () => showView('circuit');
 $('tabSplit').onclick = () => showView('split');
 $('tabLadder').onclick = () => showView('ladder');
 $('tabPlant').onclick = () => showView('plant');
+$('tabBench').onclick = () => showView('bench');
+document.querySelectorAll('.bt-win').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.bt-win').forEach(x => x.classList.toggle('active', x === b));
+  Bench.setWindow(Number(b.dataset.ms)); requestDraw();
+});
+$('btClear').onclick = () => { Bench.reset(); requestDraw(); };
 
 // Foco: esconde os painéis laterais e o diagrama ganha a largura toda.
 function toggleFocus() {
@@ -551,8 +579,10 @@ function loop(t) {
   if (!st.running) return;
   const dt = Math.min(0.1, Math.max(0, (t - lastFrame) / 1000)); lastFrame = t; st.time = t;
   try {
+    if (world.virtual) Bench.apply(world);
     const info = Engine.step(world, dt * 1000);
     LadderUI.paint(info);
+    if (world.virtual) Bench.update(world, true);
     if (world.plcPowered !== lastPowered) {
       lastPowered = world.plcPowered;
       if (!lastPowered) setStatus('CLP sem alimentação: ligue L+ e M do bloco do CLP aos trilhos +24V e 0V.', true);
@@ -569,14 +599,16 @@ function loop(t) {
 }
 function startSim() {
   if (st.running) return;
-  try { Engine.start(world); } catch (err) { setStatus('Erro: ' + err.message, true); return; }
+  const virt = currentView === 'bench';
+  try { Engine.start(world, { virtual: virt }); } catch (err) { setStatus('Erro: ' + err.message, true); return; }
   st.running = true; st.everPressed = false; lastFrame = performance.now(); lastPowered = world.plcPowered;
+  if (virt) { Bench.reset(); Bench.setRunning(true); setStatus('Bancada em RUN: use as chaves de Entradas e acompanhe as saídas e o diagrama de tempo.'); requestAnimationFrame(loop); return; }
   setStatus(lastPowered ? 'CLP em modo RUN.' + (world.parts.some(isPush) ? ' Segure o mouse sobre um botão (anel pulsante) para acioná-lo.' : '')
     : 'CLP sem alimentação: ligue L+ e M do bloco do CLP aos trilhos +24V e 0V.', !lastPowered);
   requestAnimationFrame(loop);
 }
 function stopSim() {
-  st.running = false; Engine.stop(world);
+  st.running = false; Engine.stop(world); Bench.update(world, false);
   LadderUI.paint(null); updateMetrics(); tooltip.style.display = 'none'; requestDraw();
 }
 $('simBtn').onclick = startSim;
@@ -592,6 +624,9 @@ const EXAMPLE_MSG = {
   motor: 'Exemplo do motor com proteção carregado. Clique em ▶ Simular e segure S1; depois clique no térmico F1 ou na emergência E0 para simular a falha e use S1 para reconhecer.',
   contador: 'Exemplo de contagem carregado. Simule, segure S1 para ligar a esteira e clique no sensor B3 para contar peças (5 completam o lote); veja os degraus na aba Ladder.',
   semaforo: 'Exemplo do semáforo carregado. Clique em ▶ Simular, aperte S1 e veja as lâmpadas e a aba Planta; o ciclo todo (12 s) é controlado por um único temporizador T1 no Ladder.',
+  bancada: 'Bancada carregada. Clique em ▶ Simular, ligue a chave %I0.0 (ou use Pulso) e veja %Q0.0/%Q0.1 piscarem no diagrama de tempo; %I0.1 desliga.',
+  bancada2: 'Bancada carregada. Simule e clique em Pulso de %I0.0: a cada clique %Q0.0 alterna (liga/desliga) e C1 conta; no 3º clique %Q0.1 acende. %I0.1 zera C1.',
+  sensores: 'Exemplo dos sensores de 3 fios carregado. Clique em ▶ Simular e clique em cada sensor (B1, B2, B3) para aproximar o objeto: o LED do sensor acende, a entrada do CLP liga e a lâmpada acende. B3 é NPN: o comum da entrada está no +24V.',
   tanque: 'Exemplo do tanque carregado. Clique em ▶ Simular, aperte S1 e use S2 para consumir água; veja a aba Planta.'
 };
 $('exampleSel').onchange = e => {
@@ -600,6 +635,7 @@ $('exampleSel').onchange = e => {
   if (st.running) stopSim();
   Engine.EXAMPLES[k](world);
   afterLoad(EXAMPLE_MSG[k]);
+  if (k === 'bancada' || k === 'bancada2') showView('bench'); else if (currentView === 'bench') showView('split');
 };
 $('newBtn').onclick = () => {
   if (!confirm('Limpar circuito e programa Ladder?')) return;
@@ -637,7 +673,8 @@ if (window.electronAPI && window.electronAPI.version) {
   window.electronAPI.version().then(v => { $('appVer').textContent = '• v' + v; document.title = 'EletroLab Studio v' + v + ' - CLP & Ladder'; }).catch(() => {});
 }
 Engine.loadExample(world);
-LadderUI.init({ container: ladderView, getProgram: () => world.program, onStatus: setStatus, onHoverTag: t => setHoverTag(t, 'ladder') });
+LadderUI.init({ container: ladderView, getProgram: () => world.program, onStatus: setStatus, onHoverTag: t => setHoverTag(t, 'ladder'), onChange: () => Bench.rebuild() });
+Bench.init({ io: $('benchIO'), canvas: $('benchCanvas'), getWorld: () => world, onStatus: setStatus });
 setModeHint(); updateMetrics(); updateZoomLabel(); showView('split');
 if (window.__EL_TEST__) window.__el = { world, st, G, fitView, zoomAt, showView, setHoverTag, toScreen: (x, y) => { const r = canvas.getBoundingClientRect(), v = st.view; return { x: r.left + x * v.s + v.ox, y: r.top + y * v.s + v.oy }; } };
 })();

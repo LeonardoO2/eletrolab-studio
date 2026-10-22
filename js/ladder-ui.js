@@ -12,11 +12,13 @@ const LadderUI = (function () {
     return e;
   }
 
+  let onChange = () => {};
   function init(opts) {
     host = opts.container;
     getProg = opts.getProgram;
     status = opts.onStatus || (() => {});
     onHover = opts.onHoverTag || (() => {});
+    onChange = opts.onChange || (() => {});
     render();
   }
 
@@ -49,7 +51,7 @@ const LadderUI = (function () {
     inp.onchange = () => {
       const err = check(inp.value);
       if (err) { status(err, true); inp.value = value; return; }
-      commit(inp.value.trim());
+      commit(inp.value.trim()); onChange();
     };
     return inp;
   }
@@ -86,19 +88,20 @@ const LadderUI = (function () {
       const op = el('select', 'cmpop');
       [['>', '>'], ['<', '<'], ['>=', '≥'], ['<=', '≤'], ['==', '='], ['!=', '≠']].forEach(([v, t]) => { const o = el('option', '', t); o.value = v; op.appendChild(o); });
       op.value = c.op; op.title = 'Operador de comparação';
-      op.onchange = () => { c.op = op.value; };
+      op.onchange = () => { c.op = op.value; onChange(); };
       const val = el('input', 'cmpval'); val.value = c.value; val.spellcheck = false; val.title = 'Número ou nome de tag';
       val.onchange = () => {
         const nv = PLC.cmpValue(val.value.trim());
         if (String(nv) !== val.value.trim()) status('Valor inválido: use um número ou uma tag. Foi usado ' + nv + '.', true);
-        c.value = nv; val.value = nv;
+        c.value = nv; val.value = nv; onChange();
       };
       cb.append(op, val); sr.append(el('span', 'cl'), cb, el('span', 'cl'));
     } else {
-      const sb = el('button', 'symbtn' + (c.type === 'NC' ? ' nc' : ''));
-      sb.title = c.type === 'NC' ? 'Contato NF: clique para trocar para NA' : 'Contato NA: clique para trocar para NF';
+      const NEXT = { NO: 'NC', NC: 'P', P: 'N', N: 'NO' }, NAME = { NO: 'NA', NC: 'NF', P: 'de borda de subida (P)', N: 'de borda de descida (N)' };
+      const sb = el('button', 'symbtn' + (c.type === 'NC' ? ' nc' : c.type === 'P' ? ' ep' : c.type === 'N' ? ' en' : ''));
+      sb.title = 'Contato ' + NAME[c.type] + ': clique para trocar para ' + NAME[NEXT[c.type]] + (c.type === 'P' ? '. Vale 1 só na varredura em que a tag sobe' : c.type === 'N' ? '. Vale 1 só na varredura em que a tag desce' : '');
       sb.append(el('i'), el('i'));
-      sb.onclick = () => { c.type = c.type === 'NC' ? 'NO' : 'NC'; render(); };
+      sb.onclick = () => { c.type = NEXT[c.type] || 'NO'; render(); };
       sr.append(el('span', 'cl'), sb, el('span', 'cl'));
     }
     const fr = el('div', 'footrow');
@@ -157,7 +160,7 @@ const LadderUI = (function () {
     if (preset) {
       const pre = el('input', 'preset');
       pre.type = 'number'; pre.min = '0'; pre.step = timer ? '100' : '1'; pre.value = out.preset; pre.title = timer ? 'Tempo programado (ms)' : out.type === 'ctd' ? 'Valor inicial (desce até 0)' : 'Contagem programada';
-      pre.onchange = () => { out.preset = Math.max(0, Number(pre.value) || 0); pre.value = out.preset; };
+      pre.onchange = () => { out.preset = Math.max(0, Number(pre.value) || 0); pre.value = out.preset; onChange(); };
       fr.appendChild(pre);
     }
     oc.append(tr, sr, fr);
@@ -221,6 +224,7 @@ const LadderUI = (function () {
     add.onclick = () => { prog.push(PLC.newRung()); render(); };
     host.appendChild(add);
     host.scrollTop = keep;
+    onChange();
   }
 
   // Destaca o fluxo de energia a cada varredura (info vem de PLC.scan; null = parado ou CLP sem alimentação).

@@ -700,6 +700,95 @@ test('cor do sinaleiro: ida e volta, valor inválido ignorado e tipo de planta',
   assert.strictEqual(Engine.plantKind(tankWorld()), 'tank'); assert.strictEqual(Engine.plantKind(motorWorld()), null);
 });
 
+test('bancada virtual: mapa de E/S do programa e pisca-pisca a 1 Hz sem circuito', () => {
+  const w = Engine.createWorld(); Engine.loadBenchExample(w);
+  const io = PLC.ioMap(w.program);
+  assert.deepStrictEqual(io.inputs, ['%I0.0', '%I0.1']);
+  assert.deepStrictEqual(io.outputs, ['%Q0.0', '%Q0.1']);
+  assert.deepStrictEqual(io.memory, ['%M0.0']);
+  assert.deepStrictEqual(io.timers.map(t => t.name), ['T1', 'T2']);
+  assert.deepStrictEqual(io.signals, ['%I0.0', '%I0.1', '%Q0.0', '%Q0.1', '%M0.0', 'T1.DN', 'T2.DN']);
+  Engine.start(w, { virtual: true });
+  assert.strictEqual(w.virtual, true); assert.strictEqual(w.parts.length, 0);
+  const scan = n => { for (let i = 0; i < n; i++) Engine.step(w, 20); };
+  scan(10); assert.strictEqual(!!w.rt.tags['%Q0.0'], false, 'desligado sem a chave');
+  w.vin['%I0.0'] = true; scan(1); w.vin['%I0.0'] = false;           // pulso em %I0.0: liga e sela
+  assert.strictEqual(w.rt.tags['%M0.0'], true);
+  scan(23); assert.strictEqual(w.rt.tags['%Q0.0'], false, 'ainda em T1');
+  scan(1); assert.strictEqual(w.rt.tags['%Q0.0'], true, 'T1 terminou (500 ms)'); assert.strictEqual(w.rt.tags['%Q0.1'], false);
+  scan(24); assert.strictEqual(w.rt.tags['%Q0.0'], true);
+  scan(1); assert.strictEqual(w.rt.tags['%Q0.0'], false, 'T2 terminou, reinicia'); assert.strictEqual(w.rt.tags['%Q0.1'], true, 'B é a inversa de A');
+  scan(24); assert.strictEqual(w.rt.tags['%Q0.0'], false);
+  scan(1); assert.strictEqual(w.rt.tags['%Q0.0'], true, 'segundo ciclo, período de 1 s');
+  assert.ok(w.simMs >= 1400, 'relógio de simulação avança');
+  w.vin['%I0.1'] = true; scan(2); assert.strictEqual(w.rt.tags['%M0.0'], false, 'desliga'); assert.strictEqual(!!w.rt.tags['%Q0.0'], false);
+  Engine.stop(w); assert.strictEqual(w.virtual, false); assert.deepStrictEqual(w.vin, {});
+});
+
+test('ioMap: nomes livres sem escrita são entradas; membros de temporizador e contador não; CMP ignorado', () => {
+  const p = PLC.sanitizeProgram([
+    { cells: [{ contacts: [{ type: 'NO', tag: 'Liga' }, { type: 'NO', tag: 'Z' }] }, { contacts: [{ type: 'NC', tag: 'T1.DN' }, { type: 'CMP', tag: 'C1.ACC', op: '>', value: 1 }] }], out: { type: 'coil', tag: 'Motor' } },
+    { cells: [{ contacts: [{ type: 'NO', tag: 'Motor' }] }], out: { type: 'ton', tag: 'T1', preset: 100 } },
+    { cells: [{ contacts: [{ type: 'NO', tag: '%I0.2' }] }], out: { type: 'ctu', tag: 'C1', preset: 3 } },
+    { cells: [{ contacts: [{ type: 'NO', tag: 'T1' }] }], out: { type: 'set', tag: '%Q0.5' } }]);
+  const io = PLC.ioMap(p);
+  assert.deepStrictEqual(io.inputs, ['%I0.2', 'Liga', 'Z'], 'só %I e nomes livres que ninguém escreve, %I primeiro');
+  assert.ok(!io.inputs.includes('T1.DN') && !io.inputs.includes('C1.ACC') && !io.inputs.includes('T1') && !io.inputs.includes('Motor'), 'membros, temporizador e saídas internas não são entradas');
+  assert.deepStrictEqual(io.outputs, ['%Q0.5']); assert.deepStrictEqual(io.memory, ['Motor']);
+  assert.deepStrictEqual(io.counters.map(c => c.name), ['C1']);
+});
+
+test('contatos de borda: P e N valem uma varredura; primeira varredura sem borda; contador conta 1 por clique', () => {
+  const prog = PLC.sanitizeProgram([
+    { cells: [{ contacts: [{ type: 'P', tag: '%I0.0' }] }], out: { type: 'coil', tag: '%M0.0' } },
+    { cells: [{ contacts: [{ type: 'N', tag: '%I0.0' }] }], out: { type: 'coil', tag: '%M0.1' } },
+    { cells: [{ contacts: [{ type: 'P', tag: '%I0.0' }] }], out: { type: 'ctu', tag: 'C1', preset: 3 } }]);
+  assert.strictEqual(prog[0].cells[0].contacts[0].type, 'P');
+  const rt = PLC.createRuntime(); const run = v => { rt.tags['%I0.0'] = v; PLC.scan(prog, rt, 10); return [rt.tags['%M0.0'], rt.tags['%M0.1']].map(Boolean); };
+  assert.deepStrictEqual(run(true), [false, false]);     // já ligada na partida: sem borda
+  assert.deepStrictEqual(run(true), [false, false]);
+  assert.deepStrictEqual(run(false), [false, true]);     // descida
+  assert.deepStrictEqual(run(false), [false, false]);
+  assert.deepStrictEqual(run(true), [true, false]);      // subida
+  assert.deepStrictEqual(run(true), [false, false]);     // só uma varredura
+  assert.strictEqual(rt.tags['C1.ACC'], 1);
+  assert.deepStrictEqual(PLC.ioMap(prog).inputs, ['%I0.0']);
+});
+test('exemplo bancada2: alternador por borda e contador de cliques', () => {
+  const w = Engine.createWorld(); Engine.loadEdgeExample(w); Engine.start(w, { virtual: true });
+  Engine.step(w, 20);
+  const click = () => { w.vin['%I0.0'] = true; Engine.step(w, 20); Engine.step(w, 20); w.vin['%I0.0'] = false; Engine.step(w, 20); };
+  const q = () => [!!w.rt.tags['%Q0.0'], !!w.rt.tags['%Q0.1']];
+  click(); assert.deepStrictEqual(q(), [true, false]);
+  click(); assert.deepStrictEqual(q(), [false, false]);
+  click(); assert.deepStrictEqual(q(), [true, true]); assert.strictEqual(w.rt.tags['C1.ACC'], 3);
+  w.vin['%I0.1'] = true; Engine.step(w, 20); w.vin['%I0.1'] = false; Engine.step(w, 20);
+  assert.strictEqual(w.rt.tags['C1.ACC'], 0); assert.strictEqual(!!w.rt.tags['%Q0.1'], false);
+});
+test('sensor de 3 fios: PNP e NPN com LED, só atua alimentado, e fluxo de corrente nos fios', () => {
+  const build = (npn, powered, commonOnPlus) => {
+    const w = Engine.createWorld(), mk = (t, x, y, o) => Engine.makePart(w, t, x, y, o);
+    const src = mk('source', 0, 0), b = mk('sensor3', 100, 0, { npn }), inp = mk('plc_input', 200, 0, { tag: '%I0.0' });
+    const wire = (a, ap, c, cp) => w.wires.push({ a: { id: a.id, pin: ap }, b: { id: c.id, pin: cp } });
+    if (powered) { wire(src, 1, b, 0); wire(src, 0, b, 1); }
+    wire(b, 2, inp, 0); wire(inp, 1, src, commonOnPlus ? 1 : 0);
+    Engine.start(w); return { w, b };
+  };
+  const run = (c, act) => { c.b.closed = act; Engine.step(c.w, 20); Engine.step(c.w, 20); return [!!c.w.rt.tags['%I0.0'], !!c.b.sOut]; };
+  let c = build(false, true, false);
+  assert.deepStrictEqual(run(c, false), [false, false]);
+  assert.deepStrictEqual(run(c, true), [true, true]);
+  assert.ok(Math.abs(c.b.simVoltage - 24) < 0.1 && c.b.simCurrent > 0.009 && c.b.simCurrent < 0.011);
+  c = build(true, true, true);                              // NPN: comum da entrada no +24V
+  assert.deepStrictEqual(run(c, false), [false, false]);
+  assert.deepStrictEqual(run(c, true), [true, true]);
+  c = build(false, false, false);                           // sem alimentação: não atua
+  assert.deepStrictEqual(run(c, true), [false, false]);
+  c = build(true, true, false);                             // NPN com comum no 0V: não aciona a entrada
+  assert.deepStrictEqual(run(c, true), [false, true]);
+  const back = Engine.createWorld(); Engine.loadProject(back, JSON.parse(JSON.stringify(Engine.serialize(build(true, true, true).w))));
+  const sb = back.parts.find(q => q.type === 'sensor3'); assert.strictEqual(sb.npn, true); assert.strictEqual(sb.sub, 'ind');
+});
 test('Emergência e térmico (NF) cortam a carga; sensor indutivo (NA) liga', () => {
   const w = Engine.createWorld();
   const top = Engine.makePart(w, 'rail_pos', 400, 80, { rotation: 90, len: 8 }), bot = Engine.makePart(w, 'rail_neg', 400, 300, { rotation: 90, len: 8 });
@@ -719,7 +808,7 @@ test('Emergência e térmico (NF) cortam a carga; sensor indutivo (NA) liga', ()
   b.closed = true; Engine.step(w, 20); assert.ok(Math.abs(lamp2.simVoltage) > 20, 'sensor ativado liga');
   Engine.stop(w);
   assert.strictEqual(e.closed, true); assert.strictEqual(f.closed, true); assert.strictEqual(b.closed, false, 'Parar rearma tudo');
-  assert.deepStrictEqual(Engine.LATCH_TYPES.slice().sort(), ['estop', 'sensor_ind', 'thermal']);
+  assert.deepStrictEqual(Engine.LATCH_TYPES.slice().sort(), ['estop', 'sensor3', 'sensor_ind', 'thermal']);
 });
 
 test('Folha de desenho: round-trip e saneamento', () => {

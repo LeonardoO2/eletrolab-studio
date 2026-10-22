@@ -18,7 +18,7 @@ const Render = (function () {
     return t < 0.03 ? C.neg : (t > 0.97 ? C.pos : mix(C.neg, C.pos, t));
   }
   const isRail = p => p.type === 'rail_pos' || p.type === 'rail_neg';
-  const isPush = p => p.type === 'push_no' || p.type === 'push_nc' || p.type === 'estop' || p.type === 'thermal' || p.type === 'sensor_ind';
+  const isPush = p => p.type === 'push_no' || p.type === 'push_nc' || p.type === 'estop' || p.type === 'thermal' || p.type === 'sensor_ind' || p.type === 'sensor3';
   const isVertical = p => Math.abs(Math.sin((p.rotation || 0) * Math.PI / 180)) > 0.5;
   const sortTags = (a, b) => a.localeCompare(b, undefined, { numeric: true });
 
@@ -256,6 +256,7 @@ const Render = (function () {
     const selfLabeled = p.type === 'relay_coil' || (autoName(p) !== null && p.name === autoName(p));
     if (p.name && !selfLabeled) lines.push({ t: p.name, c: p.id === o.st.selected ? C.accent : C.text, f: '12px "Segoe UI", Arial, sans-serif' });
     if (p.type === 'source') lines.push({ t: (Number(p.value) || 0) + ' V', c: C.muted, f: '10px Consolas, monospace' });
+    if (p.type === 'sensor3') lines.push({ t: (p.npn ? 'NPN ' : 'PNP ') + ({ ind: 'indut.', cap: 'capac.', foto: 'foto' }[p.sub] || 'indutivo'), c: o.run && p.sOut ? C.accent : C.muted, f: '10px Consolas, monospace' });
     if (p.type === 'level_sw') lines.push({ t: '≥ ' + (Number(p.value) || 0) + '%', c: p.closed && o.run ? C.accent : C.muted, f: '10px Consolas, monospace' });
     if (o.run && ['lamp', 'motor_load', 'relay_coil', 'pump', 'valve'].includes(p.type)) {
       lines.push({ t: (p.simVoltage || 0).toFixed(1) + ' V', c: Math.abs(p.simVoltage) > 2 ? C.accent : C.muted, f: '10px Consolas, monospace' });
@@ -290,7 +291,7 @@ const Render = (function () {
     if (!o.st.showLabels) return;
     const ctx = o.ctx, lines = labelOf(o, p), vert = isVertical(p);
     // na bobina a leitura de tensão desce um pouco, para não ficar sob a linha tracejada do acoplamento do relé
-    const x = vert ? p.x + 32 : p.x, y0 = vert ? p.y - (lines.length - 1) * 7 + (p.type === 'relay_coil' ? 16 : 0) : p.y + (p.type === 'ground' ? 28 : 40);
+    const x = vert ? p.x + (p.type === 'sensor3' ? 48 : 32) : p.x, y0 = vert ? p.y - (lines.length - 1) * 7 + (p.type === 'relay_coil' ? 16 : 0) : p.y + (p.type === 'ground' ? 28 : 40);
     ctx.textAlign = vert ? 'left' : 'center'; ctx.textBaseline = 'alphabetic';
     lines.forEach((l, i) => { ctx.fillStyle = l.c; ctx.font = l.f; ctx.fillText(l.t, x, y0 + i * 14 * (o.k || 1) + (vert ? 4 : 0)); });
   }
@@ -334,6 +335,18 @@ const Render = (function () {
       drawSwitch(ctx, p.closed, false, C.accent);
       ctx.beginPath(); ctx.moveTo(-8, -22); ctx.lineTo(-4, -28); ctx.lineTo(0, -22); ctx.lineTo(4, -28); ctx.lineTo(8, -22); ctx.stroke();
       if (!p.closed) { ctx.fillStyle = C.danger; ctx.beginPath(); ctx.arc(14, -26, 3.5, 0, Math.PI * 2); ctx.fill(); }
+    } else if (T === 'sensor3') {
+      // corpo com 3 fios: + (pino 0) e − (pino 1) nas pontas, saída (pino 2) na lateral; LED de saída e símbolo do princípio de detecção
+      const on = o.run && p.sOut, pw = o.run && p.sPow;
+      ctx.beginPath(); ctx.moveTo(-38, 0); ctx.lineTo(-27, 0); ctx.moveTo(38, 0); ctx.lineTo(27, 0); ctx.moveTo(0, -20); ctx.lineTo(0, -12); ctx.stroke();
+      ctx.beginPath(); ctx.roundRect ? ctx.roundRect(-27, -12, 54, 24, 5) : ctx.rect(-27, -12, 54, 24); ctx.fillStyle = '#16212d'; ctx.fill(); ctx.stroke();
+      if (on) { const g = ctx.createRadialGradient(-15, 0, 2, -15, 0, 22); g.addColorStop(0, 'rgba(255,214,102,.8)'); g.addColorStop(1, 'rgba(255,214,102,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(-15, 0, 22, 0, Math.PI * 2); ctx.fill(); }
+      ctx.beginPath(); ctx.arc(-15, 0, 4.5, 0, Math.PI * 2); ctx.fillStyle = on ? '#ffd666' : (pw ? '#3a4a5c' : '#1d2631'); ctx.fill(); ctx.lineWidth = 1.4; ctx.stroke(); ctx.lineWidth = 2;
+      ctx.save(); ctx.translate(8, 0); ctx.beginPath();
+      if (p.sub === 'cap') { ctx.moveTo(-3, -6); ctx.lineTo(-3, 6); ctx.moveTo(3, -6); ctx.lineTo(3, 6); }
+      else if (p.sub === 'foto') { ctx.arc(0, 0, 5, 0, Math.PI * 2); ctx.moveTo(-3, -9); ctx.lineTo(-1, -6); ctx.moveTo(3, -9); ctx.lineTo(1, -6); }
+      else { ctx.moveTo(-6, 0); ctx.lineTo(0, -6); ctx.lineTo(6, 0); ctx.lineTo(0, 6); ctx.closePath(); }
+      ctx.stroke(); ctx.restore();
     } else if (T === 'sensor_ind') {
       drawSwitch(ctx, p.closed, false, C.accent);
       ctx.beginPath(); ctx.moveTo(0, -32); ctx.lineTo(8, -25); ctx.lineTo(0, -18); ctx.lineTo(-8, -25); ctx.closePath();
