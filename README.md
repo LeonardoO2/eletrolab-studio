@@ -1,8 +1,13 @@
-# EletroLab Studio — protótipo 0.16.0
+# EletroLab Studio — protótipo 0.17.0
 
 **Licença:** MIT. Consulte o arquivo `LICENSE` para os termos completos.
 
 Aplicação desktop para Windows baseada em Electron, feita para **estudar comandos elétricos e programação de CLP (Ladder)**. Funciona localmente, sem internet depois de instalada.
+
+## Fios com pontos de passagem e objetos de teste (novidade da 0.17.0)
+- **Desenhar o caminho do fio:** em "Conectar fios (W)", clique no terminal de origem, depois clique em **pontos vazios** para marcar por onde o fio passa (a prévia tracejada mostra o caminho) e termine clicando no terminal de destino. **Backspace** desfaz o último ponto; **Esc** cancela. Assim dá para contornar outros fios e ligar vários terminais ao mesmo conector da fonte sem sobrepor.
+- **Editar um fio existente:** selecione o fio e arraste as bolinhas amarelas. O botão "Caminho automático" (no painel de propriedades) volta ao traçado automático. Os pontos são salvos no projeto e acompanham a seção quando ela é arrastada.
+- **Objeto de teste:** o seletor "Objeto" na barra (metal, água, plástico, madeira, vidro) define o que será aproximado ao clicar num sensor de 3 fios na simulação. **Indutivo** só detecta metal; **capacitivo** detecta qualquer material, inclusive água; **fotoelétrico** detecta objetos opacos (não vidro nem água). O objeto aparece ao lado do sensor e o status explica quando ele não detecta.
 
 ## Sensores de 3 fios com LED (novidade da 0.16.0)
 Em "Proteção e sensores": sensores **indutivo, capacitivo e fotoelétrico de 3 fios** (marrom BN = +24V, azul BU = 0V, preto BK = saída). Cada um tem **LED próprio**, que acende quando o sensor detecta e está alimentado.
